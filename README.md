@@ -6,6 +6,8 @@
 
 Reflux is a Vencord-style runtime injector for the Fluxer desktop app.
 
+**[📖 Documentation →](docs/writing-plugins.md)**
+
 ## Main features
 
 - asar injection into Fluxer's main process (ESM-compatible, no repacking for preload)

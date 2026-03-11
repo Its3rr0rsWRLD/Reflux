@@ -1,22 +1,29 @@
 /**
  * src/plugins/messageLogger/renderer-side.js
  *
- * Intercepts Fluxer's gateway WebSocket to catch MESSAGE_DELETE events and
- * re-displays deleted messages inline with a "Deleted" badge.
+ * Intercepts MESSAGE_DELETE events from the Fluxer gateway WebSocket and
+ * re-displays deleted messages inline as greyed-out ghost elements.
  *
- * How it works
- * ─────────────
- * 1.  WebSocket hook  — wraps the global WebSocket constructor so we always
- *     have a reference to the newest gateway.fluxer.app socket (the URL may
- *     change between versions, so we match on the hostname).
+ * Flow
+ * ────
+ * 1. JSON.parse hook  — Fluxer decompresses the zstd-stream frame then calls
+ *    JSON.parse().  We intercept there; no need to reimplement zstd.
  *
- * 2.  JSON.parse hook — Fluxer decompresses the zstd-stream binary frames
- *     itself and then calls JSON.parse() on the result.  We intercept at
- *     that point so we never need to reimplement the zstd codec.
+ * 2. Element clone    — When a DELETE arrives the real message element is
+ *    still in the DOM (React batches DOM updates to the next frame).
+ *    We clone it immediately with full fidelity — username, avatar, text.
  *
- * 3.  DOM marking     — when a MESSAGE_DELETE arrives we find the message
- *     element, style it grey + add a "Deleted" badge, then watch for React
- *     removing it and re-insert a clone so it stays visible.
+ * 3. Ghost insertion  — A MutationObserver watches the message list for the
+ *    original element being removed by React.  When that happens we insert
+ *    the styled clone in its exact position.
+ *
+ * Ghost styling applied to the clone
+ * ────────────────────────────────────
+ *  • Red left-border + very subtle red background
+ *  • Message text colour shifted to --text-muted
+ *  • Timestamp updated to the moment of deletion ("Today at X:XX AM")
+ *  • "DELETED" badge inserted after the message text
+ *  • Action bar (react / reply / forward buttons) removed
  */
 
 (function refluxMessageLogger() {
@@ -27,198 +34,215 @@
 
   const TAG = '[Reflux:MessageLogger]';
 
-  /** Map<messageId, gatewayDeleteData> */
+  /** @type {Map<string, object>} messageId → delete-event data */
   const cache = new Map();
 
   // ── 1. WebSocket hook ──────────────────────────────────────────────────────
-  // Track the newest gateway socket so we always reference the right one.
-  // The URL may include a different version query string over time; we only
-  // match on the hostname portion.
-
   const _OrigWS = window.WebSocket;
   let _newestGateway = null;
 
   function PatchedWS(url, protocols) {
-    const ws = (protocols != null)
-      ? new _OrigWS(url, protocols)
-      : new _OrigWS(url);
-
+    const ws = protocols != null ? new _OrigWS(url, protocols) : new _OrigWS(url);
     if (typeof url === 'string' && url.includes('gateway.fluxer.app')) {
       _newestGateway = ws;
       console.log(TAG, 'Gateway socket opened →', url);
       ws.addEventListener('close', () => {
         if (_newestGateway === ws) _newestGateway = null;
-        console.log(TAG, 'Gateway socket closed');
       });
     }
-
     return ws;
   }
-
-  // Preserve static constants and prototype so existing code keeps working
   PatchedWS.prototype = _OrigWS.prototype;
   Object.setPrototypeOf(PatchedWS, _OrigWS);
-  Object.defineProperties(PatchedWS, {
-    CONNECTING: { value: 0 }, OPEN:    { value: 1 },
-    CLOSING:    { value: 2 }, CLOSED:  { value: 3 },
-  });
-
   window.WebSocket = PatchedWS;
 
   // ── 2. JSON.parse hook ─────────────────────────────────────────────────────
-  // Fluxer receives compressed binary frames, decompresses them in JS, then
-  // calls JSON.parse() on the resulting string.  By intercepting JSON.parse
-  // we see every decoded gateway payload without touching zstd at all.
-
   const _origParse = JSON.parse;
 
   JSON.parse = function interceptedJSONParse(text, ...rest) {
     const result = _origParse.call(this, text, ...rest);
     try {
-      // Gateway DISPATCH: { op: 0, t: "<EVENT>", s: <seq>, d: { ... } }
       if (
         result !== null &&
         typeof result === 'object' &&
         result.op === 0 &&
-        typeof result.t === 'string' &&
-        result.d !== undefined
+        typeof result.t === 'string'
       ) {
         onGatewayDispatch(result);
       }
-    } catch { /* never let our code break Fluxer */ }
+    } catch { /* never break Fluxer */ }
     return result;
   };
 
-  // Keep native toString so devtools / Object.is checks don't trip up
   Object.defineProperty(JSON.parse, 'toString', {
     value: () => _origParse.toString(),
     configurable: true,
   });
 
-  // ── Gateway dispatch handler ───────────────────────────────────────────────
+  // ── Gateway handler ────────────────────────────────────────────────────────
 
   function onGatewayDispatch(payload) {
     if (payload.t !== 'MESSAGE_DELETE') return;
-
     const d = payload.d;
-    if (!d || !d.id || !d.content) return;   // server omitted content → nothing to show
+    if (!d?.id || !d?.content) return;
 
-    cache.set(d.id, { ...d, _deletedAt: Date.now() });
+    const entry = { ...d, _deletedAt: Date.now() };
+    cache.set(d.id, entry);
     console.log(TAG, `Deleted: "${d.content.slice(0, 100)}"`, d);
 
-    // Mark the DOM element now (before React's next reconcile removes it)
-    const el = findMsgEl(d.id);
+    // The real element is still in the DOM right now — clone it before React
+    // processes the state update.
+    const el = document.querySelector(`[data-message-id="${d.id}"]`);
     if (el && !el.dataset.refluxDeleted) {
-      watchAndGhost(el, d);
+      prepareGhost(el, entry);
     }
   }
 
-  // ── 3. DOM helpers ─────────────────────────────────────────────────────────
+  // ── Ghost builder ──────────────────────────────────────────────────────────
 
-  /** Try common attribute patterns Fluxer might use for message elements. */
-  function findMsgEl(id) {
-    return (
-      document.querySelector(`[data-id="${id}"]`)         ||
-      document.querySelector(`[id="${id}"]`)              ||
-      document.querySelector(`[data-message-id="${id}"]`) ||
-      document.querySelector(`[data-item-id="${id}"]`)
-    );
-  }
-
-  /** Apply the "deleted" visual to an element. */
-  function styleDeleted(el) {
-    el.style.setProperty('background',    'rgba(237,66,69,0.06)',    'important');
-    el.style.setProperty('border-left',   '2px solid rgba(237,66,69,0.4)', 'important');
-    el.style.setProperty('padding-left',  '8px',                    'important');
-    el.style.setProperty('opacity',       '0.65',                   'important');
-    el.style.setProperty('box-sizing',    'border-box',             'important');
-    el.dataset.refluxDeleted = 'true';
-
-    if (!el.querySelector('.rx-del-badge')) {
-      const badge = document.createElement('span');
-      badge.className = 'rx-del-badge';
-      badge.style.cssText = [
-        'display:inline-flex', 'align-items:center',
-        'font-size:10px', 'font-weight:700', 'padding:1px 5px',
-        'border-radius:3px', 'margin-left:6px', 'vertical-align:middle',
-        'background:rgba(237,66,69,0.18)', 'color:#ed4245',
-        'text-transform:uppercase', 'letter-spacing:.4px',
-        'pointer-events:none', 'user-select:none',
-      ].join(';');
-      badge.textContent = 'Deleted';
-
-      // Attach after the message content block if we can find it
-      const target = (
-        el.querySelector('[class*="messageContent"]') ||
-        el.querySelector('[class*="content"]')        ||
-        el.querySelector('p')
-      );
-      if (target) target.insertAdjacentElement('afterend', badge);
-      else        el.insertAdjacentElement('beforeend', badge);
-    }
-  }
-
-  /**
-   * Style the element, then watch its parent for removal.
-   * If React removes it, clone and re-insert so it stays visible.
-   */
-  function watchAndGhost(el, data) {
-    styleDeleted(el);
-
-    const parent      = el.parentElement;
+  function prepareGhost(el, data) {
+    const parent   = el.parentElement;
     if (!parent) return;
 
-    // Record the next sibling so we know where to re-insert later
-    const nextSibling = el.nextElementSibling;
+    // Record sibling BEFORE React can shift things around
+    const nextSib = el.nextElementSibling;
 
+    // Build the styled clone while the original is fully rendered
+    const ghost = buildGhost(el, data);
+
+    // Watch for React removing the original from the message list
     const mo = new MutationObserver((mutations) => {
       for (const m of mutations) {
         for (const removed of m.removedNodes) {
           if (removed === el || (removed.nodeType === 1 && removed.contains(el))) {
             mo.disconnect();
-            insertGhost(parent, el, nextSibling, data);
+            insertGhost(ghost, parent, nextSib);
             return;
           }
         }
       }
     });
-
     mo.observe(parent, { childList: true });
-
-    // Stop watching after 4 s — if React hasn't removed it by then, the
-    // styled element is already persisted in the DOM.
-    setTimeout(() => mo.disconnect(), 4000);
+    // Give up watching after 5 s (if React never removed it, the element
+    // is still live and our watcher would leak).
+    setTimeout(() => mo.disconnect(), 5000);
   }
 
-  /** Re-insert a styled clone of the removed message. */
-  function insertGhost(parent, original, nextSibling, data) {
-    const ghost = original.cloneNode(true);
+  function buildGhost(el, data) {
+    const ghost = el.cloneNode(true);
+
+    // Strip the unique article id to avoid duplicate-id warnings
+    ghost.removeAttribute('id');
     ghost.dataset.refluxGhost   = 'true';
     ghost.dataset.refluxDeleted = 'true';
 
-    // Re-apply styles (cloneNode copies attributes but we want to be sure)
-    styleDeleted(ghost);
+    // Start invisible so we can fade in on insert
+    ghost.style.setProperty('opacity',      '0',                            'important');
+    ghost.style.setProperty('transition',   'opacity 350ms ease',           'important');
+    ghost.style.setProperty('background',   'rgba(237,66,69,0.05)',          'important');
+    ghost.style.setProperty('border-left',  '2px solid rgba(237,66,69,0.38)','important');
+    ghost.style.setProperty('padding-left', '6px',                          'important');
+    ghost.style.setProperty('box-sizing',   'border-box',                   'important');
 
-    // Fade in
-    ghost.style.setProperty('transition', 'opacity 350ms ease', 'important');
-    ghost.style.setProperty('opacity', '0', 'important');
+    // Grey out message text
+    const markup = ghost.querySelector('[class*="markup"]');
+    if (markup) markup.style.setProperty('color', 'var(--text-muted,#949ba4)', 'important');
 
-    if (nextSibling && parent.contains(nextSibling)) {
-      parent.insertBefore(ghost, nextSibling);
+    // Update timestamp → deletion time
+    const timeEl = ghost.querySelector('time');
+    if (timeEl) applyDeletionTimestamp(timeEl, data._deletedAt);
+
+    // Inject "DELETED" badge after the markup block
+    const textWrap = ghost.querySelector('[class*="messageText"]');
+    if (textWrap) appendDeletedBadge(textWrap);
+
+    // Remove the action bar — deleted messages can't be reacted to or replied to
+    const bar =
+      ghost.querySelector('[class*="actionBarContainer"]') ||
+      ghost.querySelector('[class*="actionBar"]');
+    if (bar) bar.remove();
+
+    // Disable any remaining interactive elements so accidental clicks do nothing
+    ghost.querySelectorAll('button, a, [role="button"]').forEach(btn => {
+      btn.setAttribute('disabled', '');
+      btn.setAttribute('tabindex', '-1');
+      btn.style.setProperty('pointer-events', 'none', 'important');
+    });
+
+    return ghost;
+  }
+
+  function insertGhost(ghost, parent, nextSib) {
+    if (nextSib && parent.contains(nextSib)) {
+      parent.insertBefore(ghost, nextSib);
     } else {
       parent.appendChild(ghost);
     }
-
     // Trigger reflow then fade in
     ghost.getBoundingClientRect();
-    ghost.style.setProperty('opacity', '0.65', 'important');
-
-    console.log(TAG, 'Ghost persisted for message', data.id);
+    ghost.style.setProperty('opacity', '0.75', 'important');
   }
 
-  // ── DOM watcher ─────────────────────────────────────────────────────────────
-  // Handles the case where the cache entry existed before the element rendered
-  // (unlikely but possible if a batch delete arrives before the chat panel mounts).
+  // ── Timestamp helpers ──────────────────────────────────────────────────────
+
+  function applyDeletionTimestamp(timeEl, deletedAtMs) {
+    const date = new Date(deletedAtMs || Date.now());
+
+    // Update machine-readable attribute
+    timeEl.setAttribute('datetime', date.toISOString());
+
+    // Build "Today at H:MM AM/PM" string matching Fluxer's format
+    const h    = date.getHours();
+    const m    = date.getMinutes().toString().padStart(2, '0');
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12  = h % 12 || 12;
+    const timeStr = `Today at ${h12}:${m} ${ampm}`;
+
+    // Update aria-label
+    timeEl.setAttribute(
+      'aria-label',
+      `Deleted ${date.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' })} ${h12}:${m} ${ampm}`,
+    );
+
+    // Replace the visible text node.
+    // Structure: <time><i/><span> — </span>Today at 3:41 AM</time>
+    // The time string is the last text node inside <time>.
+    const walker = document.createTreeWalker(timeEl, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) textNodes.push(node);
+
+    // Pick the last non-empty text node (the visible time string)
+    for (let i = textNodes.length - 1; i >= 0; i--) {
+      if (textNodes[i].textContent.trim()) {
+        textNodes[i].textContent = timeStr;
+        break;
+      }
+    }
+  }
+
+  // ── Badge builder ──────────────────────────────────────────────────────────
+
+  function appendDeletedBadge(container) {
+    if (container.querySelector('.rx-del-badge')) return;
+    const badge = document.createElement('span');
+    badge.className = 'rx-del-badge';
+    badge.style.cssText = [
+      'display:inline-flex', 'align-items:center',
+      'font-size:10px', 'font-weight:700',
+      'padding:1px 5px', 'border-radius:3px',
+      'margin-left:6px', 'vertical-align:middle',
+      'background:rgba(237,66,69,0.18)', 'color:#ed4245',
+      'text-transform:uppercase', 'letter-spacing:.4px',
+      'pointer-events:none', 'user-select:none',
+    ].join(';');
+    badge.textContent = 'Deleted';
+    container.insertAdjacentElement('beforeend', badge);
+  }
+
+  // ── DOM watcher ────────────────────────────────────────────────────────────
+  // Catches the edge case where the cache entry exists but the element wasn't
+  // in the DOM yet (e.g. a batch delete arrives while navigating channels).
 
   let _watchTimer = null;
   const domWatcher = new MutationObserver(() => {
@@ -226,14 +250,13 @@
     _watchTimer = setTimeout(() => {
       _watchTimer = null;
       for (const [id, data] of cache) {
-        const el = findMsgEl(id);
+        const el = document.querySelector(`[data-message-id="${id}"]`);
         if (el && !el.dataset.refluxDeleted && !el.dataset.refluxGhost) {
-          watchAndGhost(el, data);
+          prepareGhost(el, data);
         }
       }
     }, 250);
   });
-
   domWatcher.observe(document.body, { childList: true, subtree: true });
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -244,24 +267,11 @@
     stop() {
       domWatcher.disconnect();
       clearTimeout(_watchTimer);
-
-      // Restore originals
       window.WebSocket = _OrigWS;
       JSON.parse = _origParse;
-
-      // Remove ghost elements
       document.querySelectorAll('[data-reflux-ghost]').forEach(el => el.remove());
-
-      // Restore styled-but-not-removed elements to their original appearance
-      document.querySelectorAll('[data-reflux-deleted]').forEach(el => {
-        el.removeAttribute('data-reflux-deleted');
-        ['background','border-left','padding-left','opacity','box-sizing','transition']
-          .forEach(p => el.style.removeProperty(p));
-        el.querySelector('.rx-del-badge')?.remove();
-      });
-
       cache.clear();
-      console.log(TAG, 'Stopped, DOM restored.');
+      console.log(TAG, 'Stopped, ghosts removed.');
     },
   });
 
