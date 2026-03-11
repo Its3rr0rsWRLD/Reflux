@@ -72,7 +72,7 @@ Drop a `.js` file into the Plugins → Import panel in Fluxer settings. Optional
 ```js
 // ==RefluxPlugin==
 // @name        My Plugin
-// @author      Brady
+// @author      3rr0r
 // @description Does cool stuff
 // @version     1.0.0
 // @preview     https://i.imgur.com/example.png
@@ -85,7 +85,6 @@ Drop a `.js` file into the Plugins → Import panel in Fluxer settings. Optional
 installer/          Injector script (standalone, own package.json + deps)
   index.js          Inject Reflux into Fluxer
   unpatch.js        Remove Reflux from Fluxer
-
 src/
   main-inject.mjs   ESM module injected into Fluxer's main process
   preload.js        Sandboxed preload — exposes refluxBridge via contextBridge
