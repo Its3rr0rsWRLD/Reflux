@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/wide_logo.png" alt="Reflux" />
+</p>
+
 # Reflux
 
 Reflux is a Vencord-style runtime injector for the Fluxer desktop app.
