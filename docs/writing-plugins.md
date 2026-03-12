@@ -6,6 +6,15 @@ Reflux plugins have two sides: a **main-process side** (Node.js) and an optional
 
 ## Quick start
 
+There are two ways to write a Reflux plugin depending on what you want to do:
+
+- **Contributing to Reflux** — clone the repo and add your plugin under `src/plugins/<your-plugin-name>/`. It will be discovered automatically on the next Fluxer launch.
+- **Personal use / sharing** — write a standalone `.js` file and import it via **Reflux Settings → Plugins → Import Plugin**. You don't need to clone the repo at all. See [Importable plugins](#importable-plugins-js-files) below.
+
+The rest of this section covers the built-in plugin format. For the importable format, skip to [Importable plugins](#importable-plugins-js-files).
+
+---
+
 Create a folder under `src/plugins/<your-plugin-name>/` and add `index.js`:
 
 ```js
@@ -178,7 +187,7 @@ Users can import external `.js` plugins directly from the Reflux settings UI wit
 // @author      3rr0r
 // @description Does something cool
 // @version     1.0.0
-// @preview     https://i.imgur.com/example.png
+// @icon        🔌
 // ==/RefluxPlugin==
 
 (function myPlugin() {
@@ -189,61 +198,73 @@ Users can import external `.js` plugins directly from the Reflux settings UI wit
 
 All fields in the block are optional. If omitted, the filename is used as the plugin name.
 
+### `@icon` formats
+
+The `@icon` field accepts three formats:
+
+**Emoji** — simplest option:
+```js
+// @icon        🔌
+```
+
+**Image URL** — any publicly accessible image:
+```js
+// @icon        https://i.imgur.com/abc123.png
+```
+
+**Inline `data:` URI** — embed the image directly in the file so it works offline:
+```js
+// @icon        data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB...
+```
+
+**Raw SVG** — paste an SVG string directly:
+```js
+// @icon        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#ef4444" d="M12 2L2 7l10 5 10-5-10-5z"/></svg>
+```
+
+Reflux renders whatever string is in `@icon` as the `src` of an `<img>` tag, falling back to displaying it as text if the image fails to load — so emojis and SVGs both work.
+
 The user imports it via **Reflux Settings → Plugins → Import Plugin**.
 
 ---
 
-## Full example — Compact Mode
+## Full example — Delete Logger
 
-A complete example plugin that toggles compact message density.
-
-```js
-// src/plugins/compactMode/index.js
-'use strict';
-const path = require('node:path');
-
-module.exports = {
-  name:        'compactMode',
-  displayName: 'Compact Mode',
-  description: 'Reduces message padding for a denser chat layout.',
-  rendererSrc: path.join(__dirname, 'renderer-side.js'),
-  start() {},
-  stop()  {},
-};
-```
+Logs a message to the console whenever someone deletes a message. This is an importable plugin — save it as `deleteLogger.js` and import it via **Reflux Settings → Plugins → Import Plugin**.
 
 ```js
-// src/plugins/compactMode/renderer-side.js
-(function compactMode() {
-  if (window.__compactMode_loaded) return;
-  window.__compactMode_loaded = true;
+// deleteLogger.js
+// ==RefluxPlugin==
+// @name        Delete Logger
+// @author      3rr0r
+// @description Logs deleted messages to the console.
+// @version     1.0.0
+// @icon        🗑️
+// ==/RefluxPlugin==
 
-  const STYLE_ID = 'reflux-compact-mode';
+(function deleteLogger() {
+  if (window.__reflux_deleteLogger_loaded) return;
+  window.__reflux_deleteLogger_loaded = true;
 
-  function inject() {
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
-      /* Reduce vertical padding on message groups */
-      [class*="message__"] {
-        padding-top: 2px !important;
-        padding-bottom: 2px !important;
+  const _origParse = JSON.parse;
+
+  JSON.parse = function(text, ...rest) {
+    const result = _origParse.call(this, text, ...rest);
+    try {
+      if (result?.op === 0 && result?.t === 'MESSAGE_DELETE') {
+        console.log('[DeleteLogger] Message deleted:', result.d.content);
       }
-    `;
-    document.head.appendChild(style);
-  }
-
-  function remove() {
-    document.getElementById(STYLE_ID)?.remove();
-  }
-
-  inject();
+    } catch {}
+    return result;
+  };
 
   window.__reflux?.pluginManager?.register?.({
-    name: 'compactMode',
-    start() { inject(); },
-    stop()  { remove(); window.__compactMode_loaded = false; },
+    name: 'deleteLogger',
+    start() {},
+    stop() {
+      JSON.parse = _origParse;
+      window.__reflux_deleteLogger_loaded = false;
+    },
   });
 })();
 ```

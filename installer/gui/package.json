@@ -1,0 +1,15 @@
+{
+  "name": "reflux-installer-gui",
+  "version": "1.0.0",
+  "description": "Graphical installer for Reflux",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev":   "electron . --enable-logging"
+  },
+  "dependencies": {
+    "@electron/asar": "^3.2.13",
+    "electron": "^31.0.0"
+  }
+}

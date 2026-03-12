@@ -30,7 +30,7 @@ const {pathToFileURL} = require('url');
 // Constants
 // ---------------------------------------------------------------------------
 
-const REFLUX_ROOT   = path.resolve(__dirname, '..');
+const REFLUX_ROOT   = path.resolve(__dirname, '../..');
 const REFLUX_MAIN   = path.join(REFLUX_ROOT, 'src', 'main-inject.mjs');
 const REFLUX_PRELOAD = path.join(REFLUX_ROOT, 'src', 'preload.js');
 

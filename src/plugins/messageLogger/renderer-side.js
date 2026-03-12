@@ -1,29 +1,27 @@
 /**
  * src/plugins/messageLogger/renderer-side.js
  *
- * Intercepts MESSAGE_DELETE events from the Fluxer gateway WebSocket and
- * re-displays deleted messages inline as greyed-out ghost elements.
+ * Intercepts MESSAGE_DELETE and MESSAGE_UPDATE events from the Fluxer gateway
+ * WebSocket and re-displays deleted/edited messages inline.
  *
- * Flow
- * ────
- * 1. JSON.parse hook  — Fluxer decompresses the zstd-stream frame then calls
- *    JSON.parse().  We intercept there; no need to reimplement zstd.
+ * DOM structure (discovered from live Fluxer HTML):
  *
- * 2. Element clone    — When a DELETE arrives the real message element is
- *    still in the DOM (React batches DOM updates to the next frame).
- *    We clone it immediately with full fidelity — username, avatar, text.
+ *   <message-list>                       ← container (grandparent)
+ *     <div role="group"
+ *          data-group-id="…">           ← group  (parent of message)
+ *       <div data-message-id="…"
+ *            data-message-index="0">    ← the actual message element
+ *         …
+ *       </div>
+ *     </div>
+ *   </message-list>
  *
- * 3. Ghost insertion  — A MutationObserver watches the message list for the
- *    original element being removed by React.  When that happens we insert
- *    the styled clone in its exact position.
+ * DELETE — React removes the entire group div.  We watch the grandparent for
+ *   that removal and re-insert a styled clone of the whole group.
  *
- * Ghost styling applied to the clone
- * ────────────────────────────────────
- *  • Red left-border + very subtle red background
- *  • Message text colour shifted to --text-muted
- *  • Timestamp updated to the moment of deletion ("Today at X:XX AM")
- *  • "DELETED" badge inserted after the message text
- *  • Action bar (react / reply / forward buttons) removed
+ * EDIT   — React updates the message element in place (group stays).  We read
+ *   the original text from the DOM before React patches it, then inject an
+ *   "Original" block below the new content after React's update fires.
  */
 
 (function refluxMessageLogger() {
@@ -34,8 +32,8 @@
 
   const TAG = '[Reflux:MessageLogger]';
 
-  /** @type {Map<string, object>} messageId → delete-event data */
-  const cache = new Map();
+  /** @type {Map<string, object>} messageId → delete-event data (deleted messages only) */
+  const deleteCache = new Map();
 
   // ── 1. WebSocket hook ──────────────────────────────────────────────────────
   const _OrigWS = window.WebSocket;
@@ -82,177 +80,221 @@
   // ── Gateway handler ────────────────────────────────────────────────────────
 
   function onGatewayDispatch(payload) {
-    if (payload.t !== 'MESSAGE_DELETE') return;
-    const d = payload.d;
-    if (!d?.id || !d?.content) return;
+    const { t, d } = payload;
+    if (!d?.id) return;
 
-    const entry = { ...d, _deletedAt: Date.now() };
-    cache.set(d.id, entry);
-    console.log(TAG, `Deleted: "${d.content.slice(0, 100)}"`, d);
+    if (t === 'MESSAGE_DELETE') {
+      if (!d.content) return;
+      const entry = { ...d, _deletedAt: Date.now() };
+      deleteCache.set(d.id, entry);
+      console.log(TAG, `Deleted: "${d.content.slice(0, 100)}"`, d);
 
-    // The real element is still in the DOM right now — clone it before React
-    // processes the state update.
-    const el = document.querySelector(`[data-message-id="${d.id}"]`);
-    if (el && !el.dataset.refluxDeleted) {
-      prepareGhost(el, entry);
+      const el = document.querySelector(`[data-message-id="${d.id}"]`);
+      if (el && !el.dataset.refluxDeleted) prepareDeleteGhost(el, entry);
+
+    } else if (t === 'MESSAGE_UPDATE') {
+      if (!d.content) return;
+      const el = document.querySelector(`[data-message-id="${d.id}"]`);
+      if (!el || el.dataset.refluxEdited) return;
+
+      // Read the original content from the DOM NOW — before React patches it
+      const markupEl = el.querySelector('[class*="markup"]');
+      const originalText = markupEl?.textContent?.trim();
+      if (!originalText || originalText === d.content) return; // no visible change
+
+      console.log(TAG, `Edited: "${originalText.slice(0, 100)}" → "${d.content.slice(0, 100)}"`, d);
+      watchForEdit(el, originalText);
     }
   }
 
-  // ── Ghost builder ──────────────────────────────────────────────────────────
+  // ── DELETE: ghost group ────────────────────────────────────────────────────
 
-  function prepareGhost(el, data) {
-    const parent   = el.parentElement;
-    if (!parent) return;
+  function prepareDeleteGhost(el, data) {
+    // Guard: mark the live element immediately so domWatcher doesn't
+    // call us again while we're waiting for React to remove the group.
+    if (el.dataset.refluxPending) return;
+    el.dataset.refluxPending = 'true';
 
-    // Record sibling BEFORE React can shift things around
-    const nextSib = el.nextElementSibling;
+    const group = el.parentElement;
+    const list  = group?.parentElement;
+    if (!group || !list) return;
 
-    // Build the styled clone while the original is fully rendered
-    const ghost = buildGhost(el, data);
+    const nextSib = group.nextElementSibling;
+    const ghost   = buildDeleteGhost(group, el, data);
 
-    // Watch for React removing the original from the message list
+    // Watch the entire body subtree — React may tear down a large ancestor
+    // rather than removing the group as a direct child of `list`.
     const mo = new MutationObserver((mutations) => {
       for (const m of mutations) {
         for (const removed of m.removedNodes) {
-          if (removed === el || (removed.nodeType === 1 && removed.contains(el))) {
+          if (removed === group || (removed.nodeType === 1 && removed.contains(group))) {
             mo.disconnect();
-            insertGhost(ghost, parent, nextSib);
+            insertNode(ghost, list, nextSib);
             return;
           }
         }
       }
     });
-    mo.observe(parent, { childList: true });
-    // Give up watching after 5 s (if React never removed it, the element
-    // is still live and our watcher would leak).
+    mo.observe(document.body, { childList: true, subtree: true });
     setTimeout(() => mo.disconnect(), 5000);
   }
 
-  function buildGhost(el, data) {
-    const ghost = el.cloneNode(true);
+  function buildDeleteGhost(group, el, data) {
+    const ghost   = group.cloneNode(true);
+    ghost.dataset.refluxGhost = 'true';
 
-    // Strip the unique article id to avoid duplicate-id warnings
-    ghost.removeAttribute('id');
-    ghost.dataset.refluxGhost   = 'true';
-    ghost.dataset.refluxDeleted = 'true';
+    // Remove any sibling messages that aren't the deleted one
+    ghost.querySelectorAll('[data-message-id]').forEach(sibling => {
+      if (sibling.dataset.messageId !== data.id) sibling.remove();
+    });
 
-    // Start invisible so we can fade in on insert
-    ghost.style.setProperty('opacity',      '0',                            'important');
-    ghost.style.setProperty('transition',   'opacity 350ms ease',           'important');
-    ghost.style.setProperty('background',   'rgba(237,66,69,0.05)',          'important');
-    ghost.style.setProperty('border-left',  '2px solid rgba(237,66,69,0.38)','important');
-    ghost.style.setProperty('padding-left', '6px',                          'important');
-    ghost.style.setProperty('box-sizing',   'border-box',                   'important');
+    const ghostMsg = ghost.querySelector(`[data-message-id="${data.id}"]`) || ghost;
+    ghostMsg.dataset.refluxDeleted = 'true';
+    ghostMsg.style.setProperty('background',   'rgba(237,66,69,0.05)',           'important');
+    ghostMsg.style.setProperty('border-left',  '2px solid rgba(237,66,69,0.38)', 'important');
+    ghostMsg.style.setProperty('padding-left', '6px',                            'important');
+    ghostMsg.style.setProperty('box-sizing',   'border-box',                     'important');
 
-    // Grey out message text
-    const markup = ghost.querySelector('[class*="markup"]');
+    const markup = ghostMsg.querySelector('[class*="markup"]');
     if (markup) markup.style.setProperty('color', 'var(--text-muted,#949ba4)', 'important');
 
-    // Update timestamp → deletion time
-    const timeEl = ghost.querySelector('time');
-    if (timeEl) applyDeletionTimestamp(timeEl, data._deletedAt);
+    const timeEl = ghostMsg.querySelector('time');
+    if (timeEl) applyTimestamp(timeEl, data._deletedAt, 'Deleted');
 
-    // Inject "DELETED" badge after the markup block
-    const textWrap = ghost.querySelector('[class*="messageText"]');
-    if (textWrap) appendDeletedBadge(textWrap);
+    const textWrap = ghostMsg.querySelector('[class*="messageText"]');
+    if (textWrap) appendBadge(textWrap, 'Deleted', '#ed4245', 'rgba(237,66,69,0.18)');
 
-    // Remove the action bar — deleted messages can't be reacted to or replied to
     const bar =
-      ghost.querySelector('[class*="actionBarContainer"]') ||
-      ghost.querySelector('[class*="actionBar"]');
+      ghostMsg.querySelector('[class*="actionBarContainer"]') ||
+      ghostMsg.querySelector('[class*="actionBar"]');
     if (bar) bar.remove();
 
-    // Disable any remaining interactive elements so accidental clicks do nothing
     ghost.querySelectorAll('button, a, [role="button"]').forEach(btn => {
       btn.setAttribute('disabled', '');
       btn.setAttribute('tabindex', '-1');
       btn.style.setProperty('pointer-events', 'none', 'important');
     });
 
+    ghost.style.setProperty('opacity',    '0',                  'important');
+    ghost.style.setProperty('transition', 'opacity 350ms ease', 'important');
     return ghost;
   }
 
-  function insertGhost(ghost, parent, nextSib) {
-    if (nextSib && parent.contains(nextSib)) {
-      parent.insertBefore(ghost, nextSib);
-    } else {
-      parent.appendChild(ghost);
-    }
-    // Trigger reflow then fade in
-    ghost.getBoundingClientRect();
-    ghost.style.setProperty('opacity', '0.75', 'important');
+  // ── EDIT: inject original content block ────────────────────────────────────
+
+  function watchForEdit(el, originalText) {
+    const markup = el.querySelector('[class*="markup"]');
+    if (!markup) return;
+
+    // React will update the markup subtree when it processes the edit
+    const mo = new MutationObserver(() => {
+      mo.disconnect();
+      injectOriginalBlock(el, originalText);
+    });
+    mo.observe(markup, { childList: true, subtree: true, characterData: true });
+    setTimeout(() => mo.disconnect(), 5000);
   }
 
-  // ── Timestamp helpers ──────────────────────────────────────────────────────
+  function injectOriginalBlock(el, originalText) {
+    if (el.querySelector('.rx-edit-original')) return;
+    el.dataset.refluxEdited = 'true';
 
-  function applyDeletionTimestamp(timeEl, deletedAtMs) {
-    const date = new Date(deletedAtMs || Date.now());
+    const textWrap = el.querySelector('[class*="messageText"]');
+    if (!textWrap) return;
 
-    // Update machine-readable attribute
+    // Block showing the original content
+    const block = document.createElement('div');
+    block.className = 'rx-edit-original';
+    block.style.cssText = [
+      'display:flex', 'align-items:baseline', 'gap:6px',
+      'margin-top:4px', 'padding:5px 8px',
+      'border-left:2px solid rgba(240,178,50,0.45)',
+      'background:rgba(240,178,50,0.05)',
+      'border-radius:0 3px 3px 0',
+      'box-sizing:border-box',
+    ].join(';');
+
+    const label = document.createElement('span');
+    label.style.cssText = [
+      'font-size:10px', 'font-weight:700', 'text-transform:uppercase',
+      'letter-spacing:.4px', 'color:rgba(240,178,50,0.85)',
+      'white-space:nowrap', 'flex-shrink:0',
+    ].join(';');
+    label.textContent = 'Original';
+
+    const text = document.createElement('span');
+    text.style.cssText = 'font-size:14px;color:var(--text-muted,#949ba4);';
+    text.textContent = originalText;
+
+    block.appendChild(label);
+    block.appendChild(text);
+    textWrap.insertAdjacentElement('afterend', block);
+  }
+
+  // ── Shared helpers ─────────────────────────────────────────────────────────
+
+  function insertNode(node, parent, nextSib) {
+    if (nextSib && parent.contains(nextSib)) {
+      parent.insertBefore(node, nextSib);
+    } else {
+      parent.appendChild(node);
+    }
+    node.getBoundingClientRect(); // force reflow
+    node.style.setProperty('opacity', '0.85', 'important');
+  }
+
+  function applyTimestamp(timeEl, ms, verb) {
+    const date = new Date(ms || Date.now());
     timeEl.setAttribute('datetime', date.toISOString());
 
-    // Build "Today at H:MM AM/PM" string matching Fluxer's format
-    const h    = date.getHours();
-    const m    = date.getMinutes().toString().padStart(2, '0');
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    const h12  = h % 12 || 12;
-    const timeStr = `Today at ${h12}:${m} ${ampm}`;
+    const h     = date.getHours();
+    const min   = date.getMinutes().toString().padStart(2, '0');
+    const ampm  = h >= 12 ? 'PM' : 'AM';
+    const h12   = h % 12 || 12;
+    const str   = `Today at ${h12}:${min} ${ampm}`;
 
-    // Update aria-label
-    timeEl.setAttribute(
-      'aria-label',
-      `Deleted ${date.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' })} ${h12}:${m} ${ampm}`,
+    timeEl.setAttribute('aria-label',
+      `${verb} ${date.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' })} ${h12}:${min} ${ampm}`,
     );
 
-    // Replace the visible text node.
-    // Structure: <time><i/><span> — </span>Today at 3:41 AM</time>
-    // The time string is the last text node inside <time>.
     const walker = document.createTreeWalker(timeEl, NodeFilter.SHOW_TEXT);
-    const textNodes = [];
+    const nodes  = [];
     let node;
-    while ((node = walker.nextNode())) textNodes.push(node);
-
-    // Pick the last non-empty text node (the visible time string)
-    for (let i = textNodes.length - 1; i >= 0; i--) {
-      if (textNodes[i].textContent.trim()) {
-        textNodes[i].textContent = timeStr;
-        break;
-      }
+    while ((node = walker.nextNode())) nodes.push(node);
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      if (nodes[i].textContent.trim()) { nodes[i].textContent = str; break; }
     }
   }
 
-  // ── Badge builder ──────────────────────────────────────────────────────────
-
-  function appendDeletedBadge(container) {
-    if (container.querySelector('.rx-del-badge')) return;
+  function appendBadge(container, label, color, bg) {
+    const cls = `rx-badge-${label.toLowerCase()}`;
+    if (container.querySelector(`.${cls}`)) return;
     const badge = document.createElement('span');
-    badge.className = 'rx-del-badge';
+    badge.className = cls;
     badge.style.cssText = [
       'display:inline-flex', 'align-items:center',
       'font-size:10px', 'font-weight:700',
       'padding:1px 5px', 'border-radius:3px',
       'margin-left:6px', 'vertical-align:middle',
-      'background:rgba(237,66,69,0.18)', 'color:#ed4245',
+      `background:${bg}`, `color:${color}`,
       'text-transform:uppercase', 'letter-spacing:.4px',
       'pointer-events:none', 'user-select:none',
     ].join(';');
-    badge.textContent = 'Deleted';
+    badge.textContent = label;
     container.insertAdjacentElement('beforeend', badge);
   }
 
   // ── DOM watcher ────────────────────────────────────────────────────────────
-  // Catches the edge case where the cache entry exists but the element wasn't
-  // in the DOM yet (e.g. a batch delete arrives while navigating channels).
 
   let _watchTimer = null;
   const domWatcher = new MutationObserver(() => {
     if (_watchTimer) return;
     _watchTimer = setTimeout(() => {
       _watchTimer = null;
-      for (const [id, data] of cache) {
+      for (const [id, data] of deleteCache) {
         const el = document.querySelector(`[data-message-id="${id}"]`);
-        if (el && !el.dataset.refluxDeleted && !el.dataset.refluxGhost) {
-          prepareGhost(el, data);
+        if (el && !el.dataset.refluxDeleted && !el.dataset.refluxPending && !el.closest('[data-reflux-ghost]')) {
+          prepareDeleteGhost(el, data);
         }
       }
     }, 250);
@@ -270,10 +312,17 @@
       window.WebSocket = _OrigWS;
       JSON.parse = _origParse;
       document.querySelectorAll('[data-reflux-ghost]').forEach(el => el.remove());
-      cache.clear();
-      console.log(TAG, 'Stopped, ghosts removed.');
+      document.querySelectorAll('.rx-edit-original').forEach(el => el.remove());
+      document.querySelectorAll('[data-reflux-edited]').forEach(el => {
+        delete el.dataset.refluxEdited;
+      });
+      document.querySelectorAll('[data-reflux-pending]').forEach(el => {
+        delete el.dataset.refluxPending;
+      });
+      deleteCache.clear();
+      console.log(TAG, 'Stopped.');
     },
   });
 
-  console.log(TAG, 'Loaded — watching for MESSAGE_DELETE events.');
+  console.log(TAG, 'Loaded — watching for MESSAGE_DELETE and MESSAGE_UPDATE events.');
 })();

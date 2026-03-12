@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:;">
+  <title>Reflux Installer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 480px;
+      height: 620px;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      color: rgba(255,255,255,0.9);
+      user-select: none;
+      background: transparent;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    /* ── Card ── */
+    .card {
+      width: 100%;
+      background: rgba(12,11,20,0.82);
+      backdrop-filter: blur(40px);
+      -webkit-backdrop-filter: blur(40px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 24px;
+      overflow: hidden;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.55), 0 4px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.07);
+      animation: card-enter 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    /* ── Card titlebar (drag region + window controls) ── */
+    .card-bar {
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 0 10px;
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+    }
+
+    .window-controls {
+      display: flex;
+      gap: 6px;
+      -webkit-app-region: no-drag;
+    }
+
+    .wc-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      border: 1px solid rgba(255,255,255,0.07);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.05);
+      color: rgba(255,255,255,0.28);
+      transition: background 150ms, color 150ms, border-color 150ms;
+    }
+    .wc-btn:hover        { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.14); }
+    .wc-btn--close:hover { background: rgba(248,113,113,0.2); color: #f87171; border-color: rgba(248,113,113,0.3); }
+
+    /* ── Steps area ── */
+    .steps-area {
+      padding: 22px 28px 0;
+    }
+
+    .steps {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+
+    .step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .step-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255,255,255,0.16);
+      background: transparent;
+      transition: background 300ms, border-color 300ms, box-shadow 300ms, transform 250ms;
+    }
+
+    .step-label {
+      font-size: 10px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.18);
+      letter-spacing: 0.04em;
+      transition: color 300ms;
+    }
+
+    .step.active   .step-dot   { background: #818cf8; border-color: #818cf8; box-shadow: 0 0 8px rgba(129,140,248,0.65); transform: scale(1.3); }
+    .step.active   .step-label { color: #818cf8; }
+    .step.complete .step-dot   { background: rgba(129,140,248,0.45); border-color: rgba(129,140,248,0.45); }
+    .step.complete .step-label { color: rgba(129,140,248,0.55); }
+
+    .step-connector {
+      width: 52px;
+      height: 1px;
+      background: rgba(255,255,255,0.07);
+      margin: 0 6px 13px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .step-connector-fill {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(129,140,248,0.5), transparent);
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 400ms ease-out;
+    }
+
+    .step-connector.complete .step-connector-fill { transform: scaleX(1); }
+
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07) 30%, rgba(255,255,255,0.07) 70%, transparent);
+      margin-bottom: 20px;
+    }
+
+    /* ── Sections wrap ── */
+    .sections-wrap {
+      position: relative;
+      overflow: hidden;
+      padding: 0 28px 26px;
+    }
+
+    /* Welcome: no side padding so we control it ourselves */
+    .sections-wrap.is-welcome {
+      padding: 0;
+    }
+
+    /* ── Section base ── */
+    .section { display: none; }
+    .section.active { display: block; }
+
+    /* entering = newly visible, sliding in */
+    .section.is-entering { display: block; }
+
+    /* exiting = leaving, absolutely positioned so it doesn't affect layout */
+    .section.is-exiting {
+      display: block;
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      pointer-events: none;
+    }
+
+    .section.enter-right { animation: enter-right 300ms cubic-bezier(0.25, 1, 0.5, 1) both; }
+    .section.exit-left   { animation: exit-left   280ms cubic-bezier(0.25, 1, 0.5, 1) both; }
+    .section.enter-left  { animation: enter-left  300ms cubic-bezier(0.25, 1, 0.5, 1) both; }
+    .section.exit-right  { animation: exit-right  280ms cubic-bezier(0.25, 1, 0.5, 1) both; }
+
+    /* ── Welcome screen ── */
+    .welcome-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 28px 32px;
+      text-align: center;
+      gap: 0;
+    }
+
+    .welcome-logo {
+      width: 220px;
+      height: auto;
+      filter: drop-shadow(0 0 28px rgba(99,102,241,0.55));
+      animation: logo-glow 3s ease-in-out infinite alternate;
+      margin-bottom: 12px;
+    }
+
+    .welcome-tagline {
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.2);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+
+    .welcome-desc {
+      font-size: 13px;
+      color: rgba(255,255,255,0.35);
+      line-height: 1.65;
+      max-width: 280px;
+      margin-bottom: 36px;
+    }
+
+    /* ── ToS ── */
+    .tos-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.85);
+      margin-bottom: 10px;
+    }
+
+    .tos-box {
+      height: 162px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.25);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 12px;
+      padding: 13px 15px;
+      margin-bottom: 14px;
+      scroll-behavior: smooth;
+    }
+    .tos-box::-webkit-scrollbar       { width: 4px; }
+    .tos-box::-webkit-scrollbar-track { background: transparent; }
+    .tos-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+
+    .tos-box p {
+      font-size: 12px;
+      line-height: 1.75;
+      color: rgba(255,255,255,0.42);
+      margin-bottom: 10px;
+    }
+    .tos-box p:last-child { margin-bottom: 0; }
+    .tos-box strong { color: rgba(255,255,255,0.68); font-weight: 600; }
+
+    .tos-scroll-hint {
+      text-align: center;
+      font-size: 11px;
+      color: rgba(255,255,255,0.18);
+      margin-bottom: 14px;
+      transition: opacity 300ms;
+    }
+    .tos-scroll-hint.hidden { opacity: 0; pointer-events: none; }
+
+    /* ── Loading ── */
+    .loading-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      padding: 28px 0 22px;
+    }
+
+    .loading-text {
+      font-size: 13px;
+      color: rgba(255,255,255,0.3);
+    }
+
+    /* ── Ready ── */
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 13px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      transition: background 350ms, color 350ms, border-color 350ms;
+      border: 1px solid transparent;
+    }
+    .status-pill.installed     { background: rgba(74,222,128,0.1);   color: #4ade80; border-color: rgba(74,222,128,0.22); }
+    .status-pill.not-installed { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.45); border-color: rgba(255,255,255,0.1); }
+    .status-pill.not-found     { background: rgba(248,113,113,0.1);  color: #f87171; border-color: rgba(248,113,113,0.22); }
+
+    .status-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+    }
+    .status-pill.installed .status-dot { box-shadow: 0 0 6px currentColor; animation: pulse-dot 2s ease-in-out infinite; }
+
+    .status-desc {
+      font-size: 13px;
+      color: rgba(255,255,255,0.32);
+      line-height: 1.65;
+      margin-bottom: 20px;
+    }
+
+    .error-note {
+      font-size: 11px;
+      color: rgba(248,113,113,0.7);
+      margin-top: 12px;
+      line-height: 1.55;
+      padding: 10px 12px;
+      background: rgba(248,113,113,0.06);
+      border: 1px solid rgba(248,113,113,0.15);
+      border-radius: 10px;
+    }
+
+    /* ── Buttons ── */
+    .btn-row { display: flex; gap: 10px; }
+
+    .btn {
+      padding: 11px 20px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      transition: box-shadow 180ms, transform 80ms, opacity 200ms, background 200ms, border-color 200ms;
+      letter-spacing: 0.01em;
+      flex: 1;
+    }
+    .btn:not(:disabled):hover  { transform: translateY(-1px); }
+    .btn:not(:disabled):active { transform: scale(0.97) translateY(0); }
+    .btn:disabled { opacity: 0.28; cursor: not-allowed; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #5865f2 0%, #7c6cf5 100%);
+      color: #fff;
+      border-color: rgba(255,255,255,0.1);
+      box-shadow: 0 2px 14px rgba(88,101,242,0.3);
+    }
+    .btn-primary:not(:disabled):hover { box-shadow: 0 4px 22px rgba(88,101,242,0.55); }
+
+    .btn-secondary {
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.55);
+      border-color: rgba(255,255,255,0.09);
+    }
+    .btn-secondary:not(:disabled):hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.15); }
+
+    .btn-full { width: 100%; flex: unset; }
+
+    /* ── Operating ── */
+    .op-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .op-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.88);
+    }
+
+    .log-container {
+      max-height: 200px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.28);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 12px 14px;
+      scroll-behavior: smooth;
+    }
+    .log-container::-webkit-scrollbar       { width: 4px; }
+    .log-container::-webkit-scrollbar-track { background: transparent; }
+    .log-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+
+    .log-line {
+      font-size: 12px;
+      font-family: 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+      line-height: 1.75;
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      opacity: 0;
+      transform: translateX(-6px);
+      transition: opacity 200ms ease-out, transform 200ms ease-out;
+    }
+    .log-line.visible { opacity: 1; transform: translateX(0); }
+    .log-line.step    { color: rgba(255,255,255,0.42); }
+    .log-line.warn    { color: #fbbf24; }
+    .log-line.success { color: #4ade80; }
+    .log-line.error   { color: #f87171; }
+    .log-prefix { flex-shrink: 0; opacity: 0.45; font-size: 10px; }
+    .log-msg { flex: 1; min-width: 0; word-break: break-word; }
+
+    /* ── Done ── */
+    .done-inner {
+      text-align: center;
+      padding: 8px 0 4px;
+    }
+
+    .done-icon-wrap {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: icon-pop 450ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+    .done-icon-wrap.success { background: rgba(74,222,128,0.1);  border: 1px solid rgba(74,222,128,0.25); }
+    .done-icon-wrap.error   { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.25); }
+
+    .check-path {
+      stroke-dasharray: 24;
+      stroke-dashoffset: 24;
+      animation: check-draw 400ms 200ms ease-out forwards;
+    }
+
+    .done-title {
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .done-title.success { color: #4ade80; }
+    .done-title.error   { color: #f87171; }
+
+    .done-message {
+      font-size: 13px;
+      color: rgba(255,255,255,0.35);
+      line-height: 1.65;
+      margin-bottom: 22px;
+    }
+
+    /* ── Gradient spinner ── */
+    .spinner-wrap {
+      position: relative;
+      flex-shrink: 0;
+    }
+    .spinner-wrap svg { display: block; }
+
+    .spinner {
+      border-radius: 50%;
+      border: 2.5px solid rgba(129,140,248,0.15);
+      border-top-color: #818cf8;
+      animation: spin 700ms linear infinite;
+      flex-shrink: 0;
+    }
+    .spinner-lg { width: 32px; height: 32px; border-width: 3px; }
+    .spinner-sm { width: 17px; height: 17px; border-width: 2px; }
+
+    /* ── Animations ── */
+    @keyframes card-enter {
+      from { opacity: 0; transform: translateY(20px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes enter-right {
+      from { opacity: 0; transform: translateX(36px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes exit-left {
+      from { opacity: 1; transform: translateX(0); }
+      to   { opacity: 0; transform: translateX(-36px); }
+    }
+    @keyframes enter-left {
+      from { opacity: 0; transform: translateX(-36px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes exit-right {
+      from { opacity: 1; transform: translateX(0); }
+      to   { opacity: 0; transform: translateX(36px); }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes icon-pop {
+      0%   { transform: scale(0) rotate(-12deg); opacity: 0; }
+      65%  { transform: scale(1.18) rotate(3deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0); opacity: 1; }
+    }
+    @keyframes check-draw {
+      to { stroke-dashoffset: 0; }
+    }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      15%     { transform: translateX(-8px); }
+      30%     { transform: translateX(8px); }
+      45%     { transform: translateX(-6px); }
+      60%     { transform: translateX(6px); }
+      75%     { transform: translateX(-3px); }
+      90%     { transform: translateX(3px); }
+    }
+    @keyframes pulse-dot {
+      0%,100% { opacity: 1; }
+      50%     { opacity: 0.45; }
+    }
+    @keyframes logo-glow {
+      from { filter: drop-shadow(0 0 14px rgba(99,102,241,0.4)); }
+      to   { filter: drop-shadow(0 0 30px rgba(129,140,248,0.75)); }
+    }
+    @keyframes pulse-ring {
+      0%   { transform: scale(0.92); opacity: 0.6; }
+      50%  { transform: scale(1.08); opacity: 0.2; }
+      100% { transform: scale(0.92); opacity: 0.6; }
+    }
+
+    .anim-shake { animation: shake 480ms ease-in-out; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+
+    <!-- Drag bar + window controls -->
+    <div class="card-bar">
+      <div class="window-controls">
+        <button class="wc-btn" id="btn-minimize" title="Minimize">
+          <svg width="10" height="2" viewBox="0 0 10 2" fill="currentColor"><rect width="10" height="2" rx="1"/></svg>
+        </button>
+        <button class="wc-btn wc-btn--close" id="btn-close" title="Close">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+      <!-- Steps area (hidden on welcome) -->
+      <div class="steps-area" id="steps-area" style="display:none">
+        <div class="steps" id="steps">
+          <div class="step" id="step-0">
+            <div class="step-dot"></div>
+            <span class="step-label">Terms</span>
+          </div>
+          <div class="step-connector" id="connector-0">
+            <div class="step-connector-fill"></div>
+          </div>
+          <div class="step" id="step-1">
+            <div class="step-dot"></div>
+            <span class="step-label">Setup</span>
+          </div>
+          <div class="step-connector" id="connector-1">
+            <div class="step-connector-fill"></div>
+          </div>
+          <div class="step" id="step-2">
+            <div class="step-dot"></div>
+            <span class="step-label">Done</span>
+          </div>
+        </div>
+        <div class="divider"></div>
+      </div>
+
+      <!-- Sections wrap -->
+      <div class="sections-wrap is-welcome" id="sections-wrap">
+
+        <!-- Welcome -->
+        <div class="section active" id="section-welcome">
+          <div class="welcome-inner">
+            <img
+              class="welcome-logo"
+              src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAYIAAABNCAMAAACc7ZNuAAAACXBIWXMAAAsTAAALEwEAmpwYAAAANlBMVEVHcEzh4eQxMUCpqbFycn1dXWqJiZP9/f7w8PIUFBkSEhrBwMbDw8mQj5nZ2Nysq7M0NUX///8tiIlnAAAAEXRSTlMA+T6/WLCJ/v8QIMj6w9nrcgcBlKgAAAyrSURBVHja7V2JgrOqDla0IKitvP/LXqssCSSg3eeeH6ezVIuY8GUjYZrmX/vX/rWmEZdSWxYhjH6uj7wJ9Glz5qPzZV7gePQCTvZnHhx9cqlcjMa4kANfqmRqepoK3VBs7XS7zZdFFB+mU8Owfq0vNRxoqkOj7dv9k/6z62+wI+XPqq0N9mog96/gylGfYMH9tuGTN1O+eJnAxZO7jcSUktU7Tuj6PpDPKru19fH8r/vfdnvk7dd2mhd+kHq0+0fd5Rb1k/61XoVJJRW4lR+Kgp/ez+4sUHaAk1201l27nrqaMywYwvMqO4kav1RsrfZvWgXfroDQXCMl1jEHItxZoFBPdLPDTZoCC8jPMB3blAXM/S3dQ84C306yAHxyWmosiBfbq6a6ULYMpY3S8eLIMNPtM3j78gf8Eahgh7GvoGCf8P6DoEN0UCwAaEkGoZL3CRRYf+YqTrLAM9nWWLDfxs3fwIKmg3PE2qIokgMkgYrXmhsiOUGyXRJscG9nw7Jg5xXkHtkVy4JIDkWPI7yJWGAgbabTLAiC6AAKIqc1ki1ukqCZTTARiCGLSLCxwFN/vyjMZPCbp84oeBT4iZ91GPr1VxAsUEBpqHRWRGDRKPDH9BgKjrLAozGywE9tz5ybqOhLf0CRaTpMcoVICImxa9trz6FA5YyLaICiiRFE6F5gOqB334IC9TAKNlsCPvjMqQMZLYwULk4XAKkLeJByQ9FgQxzGAszmmqWIAkVej3v5BgoEgwIgAXY9JYso8vYFugqoY8aAAfKEE3gjlGBUD2WLCFG43n4KBe6MHzzTkRmxPWoyFqB5TpEPTO21A1FEAWECKdx7MgRpE4MKWU+pXk9Y0H9XF0AQ79Qh1UEHHiKbxFEd3482a4MCHpej50yiwGNgiJ8F39cf8cScs8CzYWiTY/ckh+DKtsPUc9biN1AQNKG33y9F48siexQZpdtIhhAZ8u1ymW8tmIhbH6kowtp+9p3QQaf7S2gWBVM9TNTrz6NA8ChwXm+YyLmgdqarPzpDsyAokyzMosU8Ifdo7URzuiDncb0BXbBJuTOBHi+Knc/0GRS0mj7phEQmijoQuSEGifwCTp+LDqDgzmiRsyAclzIJNc0C3/VozvEPoeD6GV2QsiBapjsTJOEWo2lOocCpEo4Fd6UNu0k98REarxf9FAoeYcGXUQAlca5uxRX5qJ1uaBTsnbMs2K2qOOKRVsfqcRb8aRTgUWBRFCjHqqtDgsjzMjghSUhyhHGh/yAKYqjRxdNmnfv+bBQpWERlFDTNbIGDPfS0Ubqh4Lw6Vj+PgpJFlDrJd5wsmarez85NU0CBKqIAzAPLsWDv4wEWvAoFT/gFlzN+geF55NwoPxIghtgJBv2CIgvEBKN1klXHD7LgJSh4wi+4nNAF5MqQxGEyp3W7fU1PlaZI5hewCvkGA544yjNCq+q/iQK3fBMeZSflfg8vhhjywlWzoi7QM4xn5izwxyD/JAqWZ1EAl2/8WPxbbnYykeywXlAl3xx1QUop6B0P8k+i4JRFZAodhmWXzpgeWUPcek5EgSqjoMEoMC9EgfpjKGgZsxvEQzeleEHWULsURbx7PYUCZZ9hwZ9CgS74r3EZvW3hEiD0FR40SnVX1wW1Pt6Ngus31guIWISTPGAhq7SsDF2zslEKw+K2a34RBddvrBfkEbmYUhFn98QnV6A8oiILrjCJQTb/UECrA5R9EI2UgtELMigq3vFQ9Y7/n1EwVP0C5A3DNIaCPXoKBRrEgdIFAw1RoGYhehFbD367H/qdKDBvQ8FQ9Quy5Zu4UllQBE1cvq+pY7DukBMK5hGpdmrb9TVtP13b/tj+Jp5VwmBuO5faRZRRYN6FAjEc0gUA0zAFoS32HgydshAJk20fccetWPhElJjOsmWqx+wJ4hYABZU0llQAfgsFJRbo0aoUBWXZrA/pgjDXFLlCPcJ8xHIeEceCg3lE/ZdQcNAiQnHtAIJK8cIRFJhusCiFIpFDKKPMxsyhmIJkY3FADQUqVhPYnJfyWyhoj6IAiCKfFFKpO6iiQPfd1aJEolwcYBRQeYiBwjUUWORRomR3YmX8cyg4rAtCDnV9NZhCgbrJvl+/tiZ7KbtunAZrk3S6dAU6QUGejAsIeQAFKIEuSXWtoEB/Xxega2v2aIoCq5KKJKoAiorEaAYFOD2RNbqk5bKBYXoSmR+SokD/AAp8IUE13z31C8AcxuTHOaXkCnSuC3C1AeyfY4GCvmRSVQDypH4fBU6seHXW1qtAEQpgmYyPNMHKO1tIbi9YRKpiERHlPVTt1d9AgRzgwI/ECoAuoAqdkBzfuCpZUzhFgVLZrysLlgoKTjLw11DggqWeXJ05yIK8PgMnqkelMEndVFBQqGFejxvDAmsT8/WMa/Y7KIgxInV4AQMuAyCnzqKCGyfcbn3BIfQxoqUvNFHJKR2m2G77AVpuXTyOAvkOFOCirYMhy65QnwqtyrVNF1MI4VkyiBovYjOm0drxbRGL2L+We2xv/REbwb/HUSDV61HgC5HD8nFzAgVAHeCy+WgJzX05LOJQ8MIMigMUfQIF6uUoEFdeDGldtYiYMqfInqlc0Pmq+gLjEONQo9HR/DQKXH09LYYWNtcW6YLcLYPuqtSfRkHzThScsojwmoaua5d7/ijaMeYyXfQRFNxm6ds9PN+iBWgWBi9BgdP4p1kwvMQiapczSNV8iJRLMlkmdp8LgIJMg+sLtk+7Iyj4dDbd8DAKIH5qaZgS7oXR6YI9qsiA/kZmJlYBs+ky5zNUxHKhCcoi+igK9OMoiLWa9cIUKCu4qShRQDIhwy6j6FQiA1CQ+/+hrrk4Rf8mClyquCNrOZ6JiozoDVdA8n8eTXamEi3uondMhWB8Lm/QMObHUPCERQQq4qsBTSDmmScEOT653nREZtQpXC8gQjDbVIn8Z9j4LArUNywisPuGreljZBBR8ji6V9SiljeVlKVEmelgelBGPo0qNpnJcsg7PuMXPIyCc/eNVF0fbS7F3kaoCqi1OYmXOnBnfkc0rtasjIJG3FAwnxzpy3QBb/AdRMGpjy4wK6ToGchBAVVADFG0KLqezKMOkOfKVFyWpNzSwmUrcqQvQ4H9KArECFBQsokcjTwhJTcHmbJKb7RxcSNz4/2CxHFwS6GlcsPHWaDIfWLeioIYJdojP6IaU+VUgYQLj6tM46lTrL7ndf2EYEDoLQ2m0x9CQfQMnPgQ1VvQohImMRJpQz0OMmQsrKIg5DJadp7+VRToDifY0IZpP6EQAWE14oqy3PD0G9gx+znpKgriSL0s1O9CwWctIrSjFlcEoCVyookBalzYStBQo/3/sgBHRAHvVmFXPtuHJUHBxRifS21i09rs79+/Gf2mSOkS7802Teu5Xcp2Iol/jANewspJJAcUxaFMRnElCmITXVDJrJYgtYJQ6gAF62m00si05T0ogKuebJtpBjq7qO1kvw9Bm15ueWwogSTLD03EED3+HtfmY81/BAWxfpZW6uk+pfUmT8fiD6AA75yLNt6GDe2vKJNs1vu3dhrHsRvHdrBWJRveZrq0bI8C1wCEWhNRdKy+AATDCI0DUZCktjOZEAitr6qyObS9I2bB5nnCNXLIP7yVOSPoUzHUFCYxSNiUZKS0FGID+7sTW0IlKFAYC9SGjTkLXqALEArwIOCZKxUvxaki2dblvrtspQBkspdHj1KzMVoOVtmIFu87JXgUcJRn/bsXosCmSR/Eva+5LFdoc1ybSrOQRZUNLk7u6p7VnYUhadjVMRTg7dVT/6SMAirV+m0oyLdexqvgRDhVXINRqXAiSYrdzvCOhcqjc9ySQypIju7EgnfjxFdSKEiSGdEe+K9EATKYc9Jn2YFERFuMNlr26CmxHsijO8Fppd1iRpCkiDlkESVudlriW0RBvg35G1EApZHC+drhbL6ocK8i8kxQNs+N3c5d8wQStFlcveRWDijrPcS8D+9HFEHnNjzVB1GQ5KZ+BgWKQIETJ9S2Zv1tCJsSw40LgoHXEolxpkO3OVRNA3KXwn/0MfCfoBR7Efg/t4BruX+kwrfEL2B3FD/GglONXlozuxeGrKmolduuZ1YROEObXa0mtj93MaKdM8X4jobhOhTUgn0caBQLrH3GNTtzc25108iu9TtHAMKuRJlmUTL1XTsC36VFI3HPqmUHSqvL+kR2W5v3V/zvQtqdONzwM/Vbh/PebX+SBebsvTsW6Xp9wGnbJz20Ybp1veGmpKfanRrzob0XJCpkBxS8R9DurwPhXb1+nd2H9GjouPl+06K/b5TuMuln2QtzgCSn7uCjlvoXnvdXm96jreYjNPofqphLqn/ZS2wAAAAASUVORK5CYII="
+              alt="Reflux"
+              onerror="this.style.display='none';this.nextElementSibling.style.display='block'"
+            >
+            <div class="logo-fallback" style="display:none;font-size:28px;font-weight:800;letter-spacing:-0.5px;background:linear-gradient(135deg,#818cf8 0%,#c084fc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">Reflux</div>
+            <p class="welcome-tagline">Fluxer Mod Loader</p>
+            <p class="welcome-desc">Extend and customise Fluxer with plugins, themes, and more — installed in seconds.</p>
+            <button class="btn btn-primary btn-full" id="btn-start">Get Started</button>
+          </div>
+        </div>
+
+        <!-- ToS -->
+        <div class="section" id="section-tos">
+          <p class="tos-title">Terms &amp; Conditions</p>
+          <div class="tos-box" id="tos-box">
+            <p><strong>1. File Modification</strong><br>
+            Reflux modifies Fluxer's application files (<code style="font-family:monospace;font-size:11px;color:rgba(255,255,255,0.5)">app.asar</code>). A backup is automatically created at <code style="font-family:monospace;font-size:11px;color:rgba(255,255,255,0.5)">app.asar.bak</code> before any changes are made. You can restore this backup at any time using the Uninstall option.</p>
+
+            <p><strong>2. No Warranty</strong><br>
+            Reflux is provided "as-is" without warranty of any kind, express or implied. The authors make no guarantees regarding stability, compatibility with future Fluxer versions, or fitness for any particular purpose.</p>
+
+            <p><strong>3. No Affiliation</strong><br>
+            Reflux is an independent, community-developed project. It is not affiliated with, endorsed by, or supported by Fluxer or its developers in any way.</p>
+
+            <p><strong>4. Your Responsibility</strong><br>
+            You are solely responsible for ensuring your use of Reflux complies with Fluxer's Terms of Service and any applicable laws. Installing third-party modifications may violate Fluxer's ToS and could result in account suspension.</p>
+
+            <p><strong>5. Limitation of Liability</strong><br>
+            The developers of Reflux shall not be liable for any damages, data loss, account actions, or other consequences arising from the use or inability to use this software. Use at your own risk.</p>
+          </div>
+          <p class="tos-scroll-hint" id="tos-hint">Scroll to read all terms</p>
+          <div class="btn-row">
+            <button class="btn btn-secondary" id="btn-decline">Decline</button>
+            <button class="btn btn-primary"   id="btn-accept" disabled>Accept &amp; Continue</button>
+          </div>
+        </div>
+
+        <!-- Loading -->
+        <div class="section" id="section-loading">
+          <div class="loading-inner">
+            <div class="spinner spinner-lg"></div>
+            <p class="loading-text">Detecting Fluxer…</p>
+          </div>
+        </div>
+
+        <!-- Ready -->
+        <div class="section" id="section-ready">
+          <div class="status-row">
+            <div class="status-pill" id="status-pill">
+              <div class="status-dot"></div>
+              <span id="status-text">Checking…</span>
+            </div>
+          </div>
+          <p class="status-desc" id="status-desc"></p>
+          <div class="btn-row">
+            <button class="btn btn-primary"   id="btn-install">Install</button>
+            <button class="btn btn-secondary" id="btn-uninstall">Uninstall</button>
+          </div>
+          <p class="error-note" id="error-note" style="display:none;"></p>
+        </div>
+
+        <!-- Operating -->
+        <div class="section" id="section-operating">
+          <div class="op-header">
+            <div class="spinner spinner-sm"></div>
+            <span class="op-title" id="op-title">Working…</span>
+          </div>
+          <div class="log-container" id="log-container"></div>
+        </div>
+
+        <!-- Done -->
+        <div class="section" id="section-done">
+          <div class="done-inner">
+            <div class="done-icon-wrap" id="done-icon-wrap"></div>
+            <p class="done-title"   id="done-title"></p>
+            <p class="done-message" id="done-message"></p>
+            <button class="btn btn-primary btn-full" id="btn-done">Done</button>
+          </div>
+        </div>
+
+      </div><!-- /sections-wrap -->
+  </div><!-- /card -->
+
+  <script src="renderer.js"></script>
+</body>
+</html>

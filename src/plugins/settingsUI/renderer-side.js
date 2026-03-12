@@ -39,13 +39,26 @@
   const SVG_TRASH  = 'M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z';
   const SVG_PUZZLE = 'M223.07,111.06l-32-16A8,8,0,0,0,180,102.46V120H160V102.46a8,8,0,0,0-11.07-7.4l-32,16a8,8,0,0,0,0,14.88L144,136.2V160H128a8,8,0,0,0,0,16h16v23.8l-27.07,10.74a8,8,0,0,0,0,14.88l32,16A8,8,0,0,0,160,224V206.54a8,8,0,0,0,11.07,7.4l32-16a8,8,0,0,0,0-14.88L176,172.72V160h16a8,8,0,0,0,0-16H176V136.2l27.07-10.26a8,8,0,0,0,0-14.88ZM160,64V48a8,8,0,0,0-16,0V64a8,8,0,0,0,16,0ZM88,160H64a8,8,0,0,0,0,16H88a8,8,0,0,0,0-16Zm144-64H216a8,8,0,0,0,0,16h16a8,8,0,0,0,0-16ZM40,96H56a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16Zm48-32A8,8,0,0,0,99.31,58.34l-32,32a8,8,0,0,0,11.32,11.32l32-32A8,8,0,0,0,88,64Zm128,128a8,8,0,0,0-11.32,0l-32,32a8,8,0,0,0,11.32,11.32l32-32A8,8,0,0,0,216,192ZM88,192a8,8,0,0,0-11.32,0l-32,32a8,8,0,0,0,11.32,11.32l32-32A8,8,0,0,0,88,192Z';
 
-  // Multi-path icons keyed by plugin name
-  const PLUGIN_ICONS = {
-    messageLogger: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 1024 1024"><path d="M762.24 519.04V183.68a94.08 94.08 0 0 0-94.08-94.08h-10.24v68.48h10.24a25.6 25.6 0 0 1 25.6 25.6v333.44h-9.6l-16.64 3.84-25.6 7.68-16 6.4-23.68 12.8-14.08 8.96a239.36 239.36 0 0 0-22.4 19.2l-10.24 8.96a238.72 238.72 0 0 0-27.52 33.28 236.16 236.16 0 0 0-19.84 36.48c0 4.48 0 8.96-4.48 13.44a232.32 232.32 0 0 0-8.96 28.16v33.92H199.04a25.6 25.6 0 0 1-25.6-25.6V183.68a25.6 25.6 0 0 1 25.6-25.6h10.24V89.6h-10.24a94.08 94.08 0 0 0-94.08 94.08v523.52a94.08 94.08 0 0 0 94.08 94.08h294.4a236.8 236.8 0 1 0 269.44-282.88z m-37.76 401.28a168.32 168.32 0 0 1-164.48-201.6v-8.96a167.04 167.04 0 0 1 7.04-22.4c0-3.2 3.2-6.4 5.12-9.6a168.96 168.96 0 0 1 10.24-19.2l6.4-7.68a169.6 169.6 0 0 1 14.08-17.28l7.68-6.4a168.96 168.96 0 0 1 17.28-14.08l12.16-5.76a166.4 166.4 0 0 1 19.2-10.24l11.52-3.84a164.48 164.48 0 0 1 19.84-6.4H704a165.76 165.76 0 0 1 20.48 0 167.68 167.68 0 0 1 0 336z"/><path d="M606.08 336.64a34.56 34.56 0 0 0-34.56-34.56h-275.2a34.56 34.56 0 1 0 0 69.12h275.84a34.56 34.56 0 0 0 33.92-34.56zM296.32 455.04a34.56 34.56 0 1 0 0 69.12H473.6a34.56 34.56 0 0 0 0-69.12zM295.68 192a34.56 34.56 0 0 0 34.56-34.56V89.6a34.56 34.56 0 0 0-69.12 0v68.48a34.56 34.56 0 0 0 34.56 33.92zM382.08 89.6h103.68v69.12H382.08zM571.52 192a34.56 34.56 0 0 0 34.56-34.56V88.96a34.56 34.56 0 0 0-69.12 0v69.76a34.56 34.56 0 0 0 34.56 33.28zM792.32 717.44h-33.28v-31.36a34.56 34.56 0 0 0-69.12 0v64a34.56 34.56 0 0 0 34.56 34.56h67.84a34.56 34.56 0 0 0 0-69.12z"/></svg>`,
-  };
-
   function svgEl(path, w = 20, h = 20, extraStyle = '') {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" fill="currentColor" viewBox="0 0 256 256"${extraStyle ? ` style="${extraStyle}"` : ''}><path d="${path}"></path></svg>`;
+  }
+
+  /**
+   * Renders a plugin icon from three accepted formats:
+   *   - Raw SVG string  (<svg …>)
+   *   - Image URL       (https://… or data:…)
+   *   - Emoji / text    (anything else — short string)
+   * Falls back to the generic puzzle SVG when icon is falsy.
+   */
+  function renderIcon(icon) {
+    if (!icon) return svgEl(SVG_PUZZLE, 18, 18);
+    const s = String(icon).trim();
+    if (/^<svg/i.test(s)) return s;
+    if (/^(https?:|data:)/i.test(s)) {
+      return `<img src="${esc(s)}" width="22" height="22" style="object-fit:contain;border-radius:4px;" alt="" onerror="this.replaceWith(document.createRange().createContextualFragment('${svgEl(SVG_PUZZLE, 18, 18).replace(/'/g, "\\'")}'))">`;
+    }
+    // Emoji or short text
+    return `<span style="font-size:20px;line-height:1;user-select:none;">${esc(s)}</span>`;
   }
 
   // ─── Utility ──────────────────────────────────────────────────────────────
@@ -166,7 +179,7 @@
   }
 
   function parseMetadata(src, filename) {
-    const meta = { name: filename.replace(/\.js$/i,''), description: '', author: '', version: '', preview: '' };
+    const meta = { name: filename.replace(/\.js$/i,''), description: '', author: '', version: '', preview: '', icon: '' };
     const block = src.match(/\/\/\s*==RefluxPlugin==([\s\S]*?)\/\/\s*==\/RefluxPlugin==/i);
     if (block) {
       for (const line of block[1].split('\n')) {
@@ -186,7 +199,7 @@
 
   // ─── Plugin card component ─────────────────────────────────────────────────
   // Uses inline styles + CSS vars — zero dependency on Fluxer's hashed classes.
-  function makePluginCard({ id, pluginName, name, description, author, version, badge, enabled, onToggle, onRemove }) {
+  function makePluginCard({ id, icon, name, description, author, version, badge, enabled, onToggle, onRemove }) {
     const card = document.createElement('div');
     card.dataset.rxId = id;
     card.style.cssText = [
@@ -203,7 +216,7 @@
       'display:flex', 'align-items:center', 'justify-content:center',
       'color:var(--interactive-normal,#b9bbbe)',
     ].join(';');
-    iconWrap.innerHTML = PLUGIN_ICONS[pluginName] || svgEl(SVG_PUZZLE, 18, 18);
+    iconWrap.innerHTML = renderIcon(icon);
 
     // Middle: text info
     const info = document.createElement('div');
@@ -383,7 +396,7 @@
       for (const p of builtins) {
         const card = makePluginCard({
           id:          'rx-' + p.name,
-          pluginName:  p.name,
+          icon:        p.icon || null,
           name:        p.displayName || p.name,
           description: p.description || '',
           badge:       'Built-in',
@@ -403,6 +416,7 @@
       for (const p of imported) {
         const card = makePluginCard({
           id:          'rx-imp-' + p.id,
+          icon:        p.icon || null,
           name:        p.name,
           description: p.description || '',
           author:      p.author || '',

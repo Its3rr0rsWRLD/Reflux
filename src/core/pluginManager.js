@@ -154,6 +154,7 @@ function list() {
     name,
     displayName:  entry.module.displayName  || name,
     description:  entry.module.description || '',
+    icon:         entry.module.icon         || null,
     rendererSrc:  entry.module.rendererSrc  || null,
     started:      entry.started,
     enabled:      _isEnabled(name),

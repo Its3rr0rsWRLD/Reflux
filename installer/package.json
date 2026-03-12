@@ -1,13 +1,14 @@
 {
   "name": "reflux-installer",
   "version": "1.0.0",
-  "description": "Reflux installer/uninstaller for the Fluxer desktop app",
+  "description": "Installer for Reflux",
   "private": true,
   "scripts": {
-    "install-reflux":   "node index.js",
-    "uninstall-reflux": "node unpatch.js"
+    "cli": "node cli/index.js",
+    "gui": "electron gui/main.js"
   },
   "dependencies": {
-    "@electron/asar": "^3.2.13"
+    "@electron/asar": "^3.2.13",
+    "electron": "^41.0.0"
   }
 }
