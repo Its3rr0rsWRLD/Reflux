@@ -13,9 +13,9 @@
     "@electron/asar": "^3.2.13"
   },
   "devDependencies": {
-    "@yao-pkg/pkg": "^5.18.1",
+    "@yao-pkg/pkg": "latest",
     "electron": "^41.0.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "latest"
   },
   "build": {
     "appId": "dev.reflux.installer",
