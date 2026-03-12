@@ -5,6 +5,14 @@ const path = require('node:path');
 const fs = require('node:fs');
 const {Worker} = require('worker_threads');
 
+// ── Reflux source path ────────────────────────────────────────────────────────
+// In dev (unpackaged): use the repo's src/ directly.
+// When packaged: electron-builder copies src/ to resources/reflux-src/ via extraResources.
+// The worker will then copy those to %APPDATA%\Reflux\src\ for a stable runtime path.
+const REFLUX_SRC = app.isPackaged
+	? path.join(process.resourcesPath, 'reflux-src')
+	: path.join(__dirname, '..', '..', 'src');
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const LOCALAPPDATA =
@@ -94,7 +102,9 @@ function spawnWorker(win, op, asarPath) {
 			resolve();
 		};
 
-		const worker = new Worker(path.join(__dirname, 'worker.js'), {workerData: {op, asarPath}});
+		const worker = new Worker(path.join(__dirname, 'worker.js'), {
+			workerData: {op, asarPath, refluxSrc: REFLUX_SRC, isPackaged: app.isPackaged},
+		});
 
 		worker.on('message', (msg) => {
 			if (msg.event === 'progress') send(msg.type, msg.message);

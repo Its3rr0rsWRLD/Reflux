@@ -134,5 +134,8 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+# Installer build output
+installer/dist/
+
 /.claude
 CLAUDE.md

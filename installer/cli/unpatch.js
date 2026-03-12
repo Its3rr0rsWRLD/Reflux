@@ -18,7 +18,9 @@ const fs   = require('fs');
 // Helpers — mirrors the search logic in index.js
 // ---------------------------------------------------------------------------
 
-const REFLUX_ROOT    = path.resolve(__dirname, '../..');
+// When compiled with pkg, __dirname is a virtual snapshot path.
+const _BASE = process.pkg ? path.dirname(process.execPath) : path.resolve(__dirname, '..');
+const REFLUX_ROOT    = path.resolve(_BASE, '..');
 const REFLUX_PRELOAD = path.join(REFLUX_ROOT, 'src', 'preload.js');
 
 const LOCALAPPDATA = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || 'C:\\Users\\Default', 'AppData', 'Local');

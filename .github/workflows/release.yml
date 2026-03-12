@@ -1,0 +1,109 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.2.0) — must already exist in the repo'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows installers
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: installer/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: installer
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build installers
+        working-directory: installer
+        env:
+          # Suppress code-signing — no cert in CI.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node build.js
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: installer/dist/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installers
+          path: dist/
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Reflux ${{ steps.tag.outputs.name }}
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.name, '-') }}
+          generate_release_notes: true
+          files: dist/*.exe
+          body: |
+            ## Installation
+
+            ### GUI (recommended)
+            Download **`reflux-*-win-x64-setup.exe`** and run it. No installation required — it's a portable single-file app.
+
+            Reflux runtime files are copied to `%APPDATA%\Reflux\src\` on first install so Fluxer can find them even after the exe is moved.
+
+            ### CLI (advanced)
+            Download **`reflux-*-win-x64-cli.exe`** alongside the `src/` folder from this release and keep the same directory structure:
+
+            ```
+            reflux-v*/
+            ├── src/
+            └── installer/dist/reflux-*-win-x64-cli.exe
+            ```
+
+            Then run from a terminal:
+            ```
+            reflux-vX.X.X-win-x64-cli.exe          # install
+            ```

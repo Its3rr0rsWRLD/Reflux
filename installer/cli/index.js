@@ -30,7 +30,10 @@ const {pathToFileURL} = require('url');
 // Constants
 // ---------------------------------------------------------------------------
 
-const REFLUX_ROOT   = path.resolve(__dirname, '../..');
+// When compiled with pkg, __dirname is a virtual snapshot path.
+// Use the exe's actual directory and navigate up to the repo root instead.
+const _BASE = process.pkg ? path.dirname(process.execPath) : path.resolve(__dirname, '..');
+const REFLUX_ROOT   = path.resolve(_BASE, '..');
 const REFLUX_MAIN   = path.join(REFLUX_ROOT, 'src', 'main-inject.mjs');
 const REFLUX_PRELOAD = path.join(REFLUX_ROOT, 'src', 'preload.js');
 

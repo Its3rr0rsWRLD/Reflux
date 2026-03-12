@@ -6,18 +6,32 @@ const fs = require('node:fs');
 const asar = require('@electron/asar');
 const {pathToFileURL} = require('node:url');
 
-// Must be set here — Electron patches fs in the main thread but workers get
-// a clean fs, so this is just a safeguard for future-proofing.
 process.noAsar = true;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const REFLUX_ROOT = path.resolve(__dirname, '../..');
-const REFLUX_MAIN = path.join(REFLUX_ROOT, 'src', 'main-inject.mjs');
-const REFLUX_PRELOAD = path.join(REFLUX_ROOT, 'src', 'preload.js');
-
 const ASAR_MAIN_ENTRY = 'src-electron/dist/main/index.js';
 const ASAR_PRELOAD_ENTRY = 'src-electron/dist/preload/index.js';
+
+// When packaged, the GUI installer bundles src/ as extra resources.
+// We install those to %APPDATA%\Reflux\src\ so Fluxer always imports from a
+// stable, predictable path — regardless of where the installer exe lives.
+const APPDATA = process.env.APPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Roaming');
+const REFLUX_APPDATA_SRC = path.join(APPDATA, 'Reflux', 'src');
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+
+const {op, asarPath, refluxSrc, isPackaged} = workerData;
+
+// Resolve the active src path for this run.
+// Packaged: copy bundled extra-resources to %APPDATA%\Reflux\src\ (stable, survives exe moves).
+// Dev: use the repo's src/ directly.
+function resolveRefluxSrc() {
+	if (!isPackaged) return refluxSrc;
+	fs.mkdirSync(REFLUX_APPDATA_SRC, {recursive: true});
+	fs.cpSync(refluxSrc, REFLUX_APPDATA_SRC, {recursive: true, force: true});
+	return REFLUX_APPDATA_SRC;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -65,6 +79,11 @@ async function runInstall(asarPath) {
 	const bakPath = asarPath + '.bak';
 	const unpackedDir = asarPath + '.unpacked';
 	const resourcesDir = path.dirname(asarPath);
+
+	send('step', isPackaged ? 'Installing Reflux runtime files…' : 'Locating Reflux source…');
+	const activeSrc = resolveRefluxSrc();
+	const REFLUX_MAIN = path.join(activeSrc, 'main-inject.mjs');
+	const REFLUX_PRELOAD = path.join(activeSrc, 'preload.js');
 
 	send('step', 'Backing up app.asar…');
 	if (!fs.existsSync(bakPath)) {
@@ -116,6 +135,8 @@ function runUninstall(asarPath) {
 	const bakPath = asarPath + '.bak';
 	const unpackedDir = asarPath + '.unpacked';
 	const resourcesDir = path.dirname(asarPath);
+	const activeSrc = isPackaged ? REFLUX_APPDATA_SRC : refluxSrc;
+	const REFLUX_PRELOAD = path.join(activeSrc, 'preload.js');
 
 	send('step', 'Restoring original asar…');
 	if (!fs.existsSync(bakPath)) throw new Error('Backup not found. Cannot restore.');
@@ -144,8 +165,6 @@ function runUninstall(asarPath) {
 }
 
 // ── Entry ─────────────────────────────────────────────────────────────────────
-
-const {op, asarPath} = workerData;
 
 (async () => {
 	try {

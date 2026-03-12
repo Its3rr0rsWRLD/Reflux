@@ -1,14 +1,50 @@
 {
   "name": "reflux-installer",
   "version": "1.0.0",
-  "description": "Installer for Reflux",
+  "description": "Installer for Reflux — Fluxer mod loader",
   "private": true,
+  "main": "gui/main.js",
   "scripts": {
     "cli": "node cli/index.js",
-    "gui": "electron gui/main.js"
+    "gui": "electron gui/main.js",
+    "build": "node build.js"
   },
   "dependencies": {
-    "@electron/asar": "^3.2.13",
-    "electron": "^41.0.0"
+    "@electron/asar": "^3.2.13"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^5.18.1",
+    "electron": "^41.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "dev.reflux.installer",
+    "productName": "Reflux Installer",
+    "copyright": "Reflux contributors",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "gui/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../src",
+        "to": "reflux-src"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "reflux-v${version}-win-x64-setup.exe"
+    }
   }
 }
