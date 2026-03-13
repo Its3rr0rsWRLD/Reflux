@@ -33,7 +33,7 @@ console.log(`\nBuilding Reflux ${tag} — Windows x64\n${'─'.repeat(44)}`);
 // ── 1. GUI: electron-builder portable ────────────────────────────────────────
 console.log('\n[1/2] GUI installer (electron-builder portable)…');
 
-execSync('pnpm exec electron-builder --win portable --publish never', {
+execSync('npx electron-builder --win portable --publish never', {
 	cwd: ROOT,
 	stdio: 'inherit',
 	env: {
@@ -50,7 +50,7 @@ console.log('\n[2/2] CLI installer (pkg)…');
 
 const cliOut = path.join(DIST, `reflux-${tag}-${platform}-cli.exe`);
 
-execSync(`pnpm exec pkg cli/index.js --targets node20-win-x64 --output "${cliOut}"`, {
+execSync(`npx pkg cli/index.js --targets node20-win-x64 --output "${cliOut}"`, {
 	cwd: ROOT,
 	stdio: 'inherit',
 });
