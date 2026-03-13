@@ -27,13 +27,11 @@
     "directories": {
       "output": "dist"
     },
+    "asar": false,
     "files": [
       "gui/**/*",
       "node_modules/**/*",
       "package.json"
-    ],
-    "asarUnpack": [
-      "gui/worker.js"
     ],
     "win": {
       "target": [

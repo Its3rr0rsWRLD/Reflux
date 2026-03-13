@@ -22,17 +22,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: latest
-
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: pnpm
-          cache-dependency-path: installer/pnpm-lock.yaml
+          cache: npm
+          cache-dependency-path: installer/package-lock.json
 
       - name: Resolve version
         id: version
@@ -72,7 +67,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: installer
-        run: pnpm install --no-frozen-lockfile
+        run: npm ci
 
       - name: Build installers
         working-directory: installer
