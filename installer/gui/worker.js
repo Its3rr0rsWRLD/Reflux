@@ -3,6 +3,10 @@
 const {parentPort, workerData} = require('worker_threads');
 const path = require('node:path');
 const fs = require('node:fs');
+const https = require('node:https');
+const http = require('node:http');
+const os = require('node:os');
+const {execSync} = require('node:child_process');
 const asar = require('@electron/asar');
 const {pathToFileURL} = require('node:url');
 
@@ -12,26 +16,14 @@ process.noAsar = true;
 
 const ASAR_MAIN_ENTRY = 'src-electron/dist/main/index.js';
 const ASAR_PRELOAD_ENTRY = 'src-electron/dist/preload/index.js';
+const GITHUB_REPO = 'its3rr0rswrld/Reflux';
 
-// When packaged, the GUI installer bundles src/ as extra resources.
-// We install those to %APPDATA%\Reflux\src\ so Fluxer always imports from a
-// stable, predictable path — regardless of where the installer exe lives.
 const APPDATA = process.env.APPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Roaming');
 const REFLUX_APPDATA_SRC = path.join(APPDATA, 'Reflux', 'src');
 
 // ── Inputs ────────────────────────────────────────────────────────────────────
 
-const {op, asarPath, refluxSrc, isPackaged} = workerData;
-
-// Resolve the active src path for this run.
-// Packaged: copy bundled extra-resources to %APPDATA%\Reflux\src\ (stable, survives exe moves).
-// Dev: use the repo's src/ directly.
-function resolveRefluxSrc() {
-	if (!isPackaged) return refluxSrc;
-	fs.mkdirSync(REFLUX_APPDATA_SRC, {recursive: true});
-	fs.cpSync(refluxSrc, REFLUX_APPDATA_SRC, {recursive: true, force: true});
-	return REFLUX_APPDATA_SRC;
-}
+const {op, asarPath, isPackaged, devSrc} = workerData;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +33,63 @@ function send(type, message) {
 
 function complete(success, message) {
 	parentPort.postMessage({event: 'complete', success, message});
+}
+
+// Download a URL to a local file, following redirects.
+function download(url, dest) {
+	return new Promise((resolve, reject) => {
+		const file = fs.createWriteStream(dest);
+		function get(u) {
+			const mod = u.startsWith('https') ? https : http;
+			mod
+				.get(u, (res) => {
+					if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+						res.resume();
+						get(res.headers.location);
+						return;
+					}
+					if (res.statusCode !== 200) {
+						file.close();
+						reject(new Error(`Download failed: HTTP ${res.statusCode}`));
+						return;
+					}
+					res.pipe(file);
+					file.on('finish', () => file.close(resolve));
+					file.on('error', reject);
+				})
+				.on('error', reject);
+		}
+		get(url);
+	});
+}
+
+// Download the latest src zip from GitHub releases and extract to AppData.
+async function downloadSrc() {
+	const url = `https://github.com/${GITHUB_REPO}/releases/latest/download/reflux-src.zip`;
+	const tmpZip = path.join(os.tmpdir(), `reflux-src-${Date.now()}.zip`);
+
+	send('step', 'Downloading Reflux runtime from GitHub…');
+	await download(url, tmpZip);
+
+	send('step', 'Extracting runtime files…');
+	if (fs.existsSync(REFLUX_APPDATA_SRC)) fs.rmSync(REFLUX_APPDATA_SRC, {recursive: true});
+	fs.mkdirSync(REFLUX_APPDATA_SRC, {recursive: true});
+
+	execSync(`powershell -NonInteractive -Command "Expand-Archive -LiteralPath '${tmpZip}' -DestinationPath '${REFLUX_APPDATA_SRC}' -Force"`, {
+		stdio: 'pipe',
+	});
+	fs.unlinkSync(tmpZip);
+
+	return REFLUX_APPDATA_SRC;
+}
+
+// Resolve the active src path: download from GitHub when packaged, use local in dev.
+async function getRefluxSrc() {
+	if (!isPackaged) {
+		send('step', 'Using local Reflux source (dev mode)…');
+		return devSrc;
+	}
+	return await downloadSrc();
 }
 
 function findMainEntry(extractDir) {
@@ -58,11 +107,9 @@ function findMainEntry(extractDir) {
 	}
 
 	const candidates = [ASAR_MAIN_ENTRY, 'dist/main/index.js', 'app/dist/main/index.js', 'main/index.js', 'main.js', 'index.js'];
-
 	for (const candidate of candidates) {
 		if (fs.existsSync(path.join(extractDir, ...candidate.split('/')))) return candidate;
 	}
-
 	throw new Error(`Could not locate main entry.\nTried: ${candidates.join(', ')}`);
 }
 
@@ -73,15 +120,14 @@ function prependOnce(filePath, line) {
 	return true;
 }
 
-// ── Install ───────────────────────────────────────────────────────────────────
+// ── Install / Repair ───────────────────────────────────────────────────────────
 
 async function runInstall(asarPath) {
 	const bakPath = asarPath + '.bak';
 	const unpackedDir = asarPath + '.unpacked';
 	const resourcesDir = path.dirname(asarPath);
 
-	send('step', isPackaged ? 'Installing Reflux runtime files…' : 'Locating Reflux source…');
-	const activeSrc = resolveRefluxSrc();
+	const activeSrc = await getRefluxSrc();
 	const REFLUX_MAIN = path.join(activeSrc, 'main-inject.mjs');
 	const REFLUX_PRELOAD = path.join(activeSrc, 'preload.js');
 
@@ -129,14 +175,24 @@ async function runInstall(asarPath) {
 	complete(true, 'Reflux installed successfully. Restart Fluxer to activate.');
 }
 
+// ── Update ────────────────────────────────────────────────────────────────────
+
+async function runUpdate() {
+	if (!isPackaged) {
+		complete(true, 'Running in dev mode — source is already up to date.');
+		return;
+	}
+	await downloadSrc();
+	complete(true, 'Reflux runtime updated. Restart Fluxer to apply the latest version.');
+}
+
 // ── Uninstall ─────────────────────────────────────────────────────────────────
 
 function runUninstall(asarPath) {
 	const bakPath = asarPath + '.bak';
 	const unpackedDir = asarPath + '.unpacked';
 	const resourcesDir = path.dirname(asarPath);
-	const activeSrc = isPackaged ? REFLUX_APPDATA_SRC : refluxSrc;
-	const REFLUX_PRELOAD = path.join(activeSrc, 'preload.js');
+	const REFLUX_PRELOAD = path.join(REFLUX_APPDATA_SRC, 'preload.js');
 
 	send('step', 'Restoring original asar…');
 	if (!fs.existsSync(bakPath)) throw new Error('Backup not found. Cannot restore.');
@@ -169,6 +225,7 @@ function runUninstall(asarPath) {
 (async () => {
 	try {
 		if (op === 'install') await runInstall(asarPath);
+		else if (op === 'update') await runUpdate();
 		else if (op === 'uninstall') runUninstall(asarPath);
 		else complete(false, `Unknown op: ${op}`);
 	} catch (err) {

@@ -5,15 +5,11 @@ const path = require('node:path');
 const fs = require('node:fs');
 const {Worker} = require('worker_threads');
 
-// ── Reflux source path ────────────────────────────────────────────────────────
-// In dev (unpackaged): use the repo's src/ directly.
-// When packaged: electron-builder copies src/ to resources/reflux-src/ via extraResources.
-// The worker will then copy those to %APPDATA%\Reflux\src\ for a stable runtime path.
-const REFLUX_SRC = app.isPackaged
-	? path.join(process.resourcesPath, 'reflux-src')
-	: path.join(__dirname, '..', '..', 'src');
-
 // ── Constants ─────────────────────────────────────────────────────────────────
+
+// In dev mode, pass the local src/ path to the worker so it uses it directly.
+// In packaged mode, the worker downloads src from GitHub releases instead.
+const DEV_SRC = path.join(__dirname, '..', '..', 'src');
 
 const LOCALAPPDATA =
 	process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || 'C:\\Users\\Default', 'AppData', 'Local');
@@ -103,7 +99,7 @@ function spawnWorker(win, op, asarPath) {
 		};
 
 		const worker = new Worker(path.join(__dirname, 'worker.js'), {
-			workerData: {op, asarPath, refluxSrc: REFLUX_SRC, isPackaged: app.isPackaged},
+			workerData: {op, asarPath, isPackaged: app.isPackaged, devSrc: DEV_SRC},
 		});
 
 		worker.on('message', (msg) => {
@@ -141,13 +137,14 @@ app.whenReady().then(() => {
 		},
 	});
 
-	win.loadFile('index.html');
+	win.loadFile(path.join(__dirname, 'index.html'));
 
 	win.on('close', (e) => {
 		if (operating) e.preventDefault();
 	});
 
 	ipcMain.handle('reflux:check-status', () => checkStatus());
+	ipcMain.handle('reflux:version', () => app.getVersion());
 
 	ipcMain.on('reflux:install', async () => {
 		operating = true;
@@ -171,6 +168,20 @@ app.whenReady().then(() => {
 			const resourcesDir = findResourcesDirForUninstall();
 			const asarPath = path.join(resourcesDir, 'app.asar');
 			await spawnWorker(win, 'uninstall', asarPath);
+		} catch (err) {
+			if (win && !win.isDestroyed()) {
+				win.webContents.send('reflux:progress', {type: 'error', message: err.message});
+				win.webContents.send('reflux:complete', {success: false, message: err.message});
+			}
+		} finally {
+			operating = false;
+		}
+	});
+
+	ipcMain.on('reflux:update', async () => {
+		operating = true;
+		try {
+			await spawnWorker(win, 'update', null);
 		} catch (err) {
 			if (win && !win.isDestroyed()) {
 				win.webContents.send('reflux:progress', {type: 'error', message: err.message});

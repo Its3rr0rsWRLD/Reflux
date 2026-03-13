@@ -1,14 +1,16 @@
 <p align="center">
-  <img src=".github/assets/wide_logo.png" alt="Reflux" />
+  <img src=".github/assets/text_logo.png" alt="Reflux"/>
 </p>
 
-# Reflux
+<p align="center">
+  Reflux is a Vencord-style runtime injector for the Fluxer desktop app.
+</p>
 
-Reflux is a Vencord-style runtime injector for the Fluxer desktop app.
+<h3 align="center">
+  <a href="docs/writing-plugins.md">📃 Documentation →</a>
+</h3>
 
-**[📖 Documentation →](docs/writing-plugins.md)**
-
-## Main features
+<h2 align="center">Main features</h2>
 
 - asar injection into Fluxer's main process (ESM-compatible, no repacking for preload)
 - CSP stripping so renderer scripts load without restriction
@@ -19,14 +21,14 @@ Reflux is a Vencord-style runtime injector for the Fluxer desktop app.
 - Import custom `.js` plugins at runtime with `==RefluxPlugin==` metadata blocks
 - Settings persisted to `%APPDATA%\Reflux\settings.json`
 
-## Bundled plugins
+<h2 align="center">Bundled plugins</h2>
 
 | Plugin | Description |
 |---|---|
 | **Settings UI** | Adds a "Reflux" sidebar section to Fluxer settings with plugin toggles and import |
 | **Message Logger** | Intercepts `MESSAGE_DELETE` gateway events and re-displays deleted messages inline |
 
-## Install
+<h2 align="center">Install</h2>
 
 ```bash
 cd installer
@@ -42,7 +44,7 @@ Override the target manually:
 FLUXER_ASAR=C:\Users\<USERNAME>\AppData\Local\fluxer_app\app-0.0.8\resources\app.asar node installer/index.js
 ```
 
-## Uninstall
+<h2 align="center">Uninstall</h2>
 
 ```bash
 node installer/unpatch.js
@@ -50,7 +52,7 @@ node installer/unpatch.js
 
 Restores `app.asar` from `app.asar.bak` and removes all injected lines from the unpacked preload.
 
-## Writing a plugin
+<h2 align="center">Writing a plugin</h2>
 
 Create `src/plugins/<name>/index.js` exporting:
 
@@ -67,7 +69,7 @@ module.exports = {
 
 The optional `rendererSrc` file is injected into Fluxer's web context via `executeJavaScript` after the core bootstrap runs. Use `window.__reflux` and `window.refluxBridge` inside it.
 
-### Importable plugins (`.js` files)
+<h3 align="center">Importable plugins (`.js` files)</h3>
 
 Drop a `.js` file into the Plugins → Import panel in Fluxer settings. Optionally include a metadata block at the top:
 
@@ -81,7 +83,7 @@ Drop a `.js` file into the Plugins → Import panel in Fluxer settings. Optional
 // ==/RefluxPlugin==
 ```
 
-## Repo layout
+<h2 align="center">Repo layout</h2>
 
 ```
 installer/          Injector script (standalone, own package.json + deps)
@@ -100,7 +102,7 @@ src/
     messageLogger/  Deleted message logger via gateway WebSocket interception
 ```
 
-## What injection modifies
+<h2 align="center">What injection modifies</h2>
 
 - `resources/app.asar` — `await import(...)` line prepended to `src-electron/dist/main/index.js`
   - backup: `app.asar.bak`
@@ -108,7 +110,8 @@ src/
 
 Settings are stored at `%APPDATA%\Reflux\settings.json`.
 
-## Default install path
+<h2 align="center">Default install path</h2>
 
 - Windows: `%LOCALAPPDATA%\fluxer_app\app-<version>\resources\`
 - Canary: `%LOCALAPPDATA%\Fluxer Canary\app-<version>\resources\`
+

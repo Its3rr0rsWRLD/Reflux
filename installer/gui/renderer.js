@@ -35,6 +35,8 @@ const statusText = $('status-text');
 const statusDesc = $('status-desc');
 const errorNote = $('error-note');
 const btnInstall = $('btn-install');
+const btnUpdate = $('btn-update');
+const btnRowUpdate = $('btn-row-update');
 const btnUninstall = $('btn-uninstall');
 const opTitle = $('op-title');
 const logContainer = $('log-container');
@@ -76,8 +78,17 @@ function showSection(el, direction = 'forward') {
 	const enterClass = direction === 'forward' ? 'enter-right' : 'enter-left';
 	const exitClass = direction === 'forward' ? 'exit-left' : 'exit-right';
 
+	// Reset both elements to cancel any in-progress animation before starting new ones.
+	// Without this, a fast IPC response can call showSection again before the previous
+	// enter animation finishes, leaving stale animationend listeners that corrupt state.
+	prev.className = 'section';
+	void prev.offsetWidth;
+	el.style.display = 'block';
+	el.className = 'section';
+	void el.offsetWidth;
+
 	// Outgoing: absolutely positioned so it doesn't push layout
-	prev.classList.add('is-exiting', exitClass);
+	prev.className = `section is-exiting ${exitClass}`;
 	prev.addEventListener(
 		'animationend',
 		() => {
@@ -88,8 +99,6 @@ function showSection(el, direction = 'forward') {
 	);
 
 	// Incoming
-	el.style.display = 'block';
-	void el.offsetWidth; // force reflow
 	el.className = `section is-entering ${enterClass}`;
 	el.addEventListener(
 		'animationend',
@@ -160,6 +169,7 @@ function render(direction = 'forward') {
 				statusPill.className = 'status-pill not-found';
 				statusText.textContent = 'Fluxer Not Found';
 				statusDesc.textContent = 'Could not locate Fluxer on your system. Make sure Fluxer is installed first.';
+				btnRowUpdate.style.display = 'none';
 				btnInstall.disabled = true;
 				btnUninstall.disabled = true;
 				if (ctx.detectError) {
@@ -170,15 +180,17 @@ function render(direction = 'forward') {
 				statusPill.className = 'status-pill installed';
 				statusText.textContent = 'Reflux Installed';
 				statusDesc.textContent = 'Reflux is active. Restart Fluxer after making changes.';
+				btnRowUpdate.style.display = 'flex';
 				btnInstall.textContent = 'Repair';
 				btnInstall.disabled = false;
 				btnInstall.className = 'btn btn-secondary';
 				btnUninstall.disabled = false;
-				btnUninstall.className = 'btn btn-primary';
+				btnUninstall.className = 'btn btn-secondary';
 			} else {
 				statusPill.className = 'status-pill not-installed';
 				statusText.textContent = 'Not Installed';
 				statusDesc.textContent = 'Fluxer is detected. Install Reflux to get started.';
+				btnRowUpdate.style.display = 'none';
 				btnInstall.textContent = 'Install';
 				btnInstall.disabled = false;
 				btnInstall.className = 'btn btn-primary';
@@ -196,7 +208,9 @@ function render(direction = 'forward') {
 					? 'Uninstalling Reflux…'
 					: ctx.lastOp === 'repair'
 						? 'Repairing Reflux…'
-						: 'Installing Reflux…';
+						: ctx.lastOp === 'update'
+							? 'Updating Reflux…'
+							: 'Installing Reflux…';
 			break;
 		}
 
@@ -214,7 +228,13 @@ function render(direction = 'forward') {
           </svg>`;
 				doneTitleEl.className = 'done-title success';
 				doneTitleEl.textContent =
-					ctx.lastOp === 'uninstall' ? 'Uninstalled!' : ctx.lastOp === 'repair' ? 'Repaired!' : 'Installed!';
+					ctx.lastOp === 'uninstall'
+						? 'Uninstalled!'
+						: ctx.lastOp === 'repair'
+							? 'Repaired!'
+							: ctx.lastOp === 'update'
+								? 'Updated!'
+								: 'Installed!';
 				btnDone.textContent = 'Done';
 			} else {
 				doneIconWrap.className = 'done-icon-wrap error';
@@ -282,6 +302,11 @@ btnAccept.addEventListener('click', async () => {
 	);
 });
 
+btnUpdate.addEventListener('click', () => {
+	transition('OPERATING', {lastOp: 'update'}, 'forward');
+	window.refluxInstaller.update();
+});
+
 btnInstall.addEventListener('click', () => {
 	if (btnInstall.disabled) return;
 	const isRepair = ctx.installed;
@@ -317,6 +342,12 @@ $('btn-close').addEventListener('click', () => window.refluxInstaller.close());
 (async () => {
 	updateSteps('LOADING');
 	showSection(sLoading);
+
+	window.refluxInstaller.version().then((v) => {
+		const badge = $('version-badge');
+		if (badge && v) badge.textContent = v;
+	});
+
 	const status = await window.refluxInstaller.checkStatus();
 	if (status.installed) {
 		// Already installed — skip welcome/ToS, go straight to Repair/Uninstall

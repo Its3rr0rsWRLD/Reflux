@@ -9,6 +9,9 @@
     "gui": "electron gui/main.js",
     "build": "node build.js"
   },
+  "reflux": {
+    "githubRepo": "its3rr0rswrld/Reflux"
+  },
   "dependencies": {
     "@electron/asar": "^3.2.13"
   },
@@ -29,11 +32,8 @@
       "node_modules/**/*",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "../src",
-        "to": "reflux-src"
-      }
+    "asarUnpack": [
+      "gui/worker.js"
     ],
     "win": {
       "target": [

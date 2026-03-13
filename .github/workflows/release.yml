@@ -34,6 +34,42 @@ jobs:
           cache: pnpm
           cache-dependency-path: installer/pnpm-lock.yaml
 
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          VER="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "ver=${VER}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version
+        shell: bash
+        env:
+          VER: ${{ steps.version.outputs.ver }}
+        run: |
+          node -e "
+            const f = 'installer/package.json';
+            const p = JSON.parse(require('fs').readFileSync(f, 'utf8'));
+            p.version = process.env.VER;
+            require('fs').writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
+          "
+          node -e "
+            const f = 'src/preload.js';
+            let s = require('fs').readFileSync(f, 'utf8');
+            s = s.replace(/version:\s*'[^']*'/, \"version: '\" + process.env.VER + \"'\");
+            require('fs').writeFileSync(f, s);
+          "
+
+      - name: Build src zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "src\*" -DestinationPath "reflux-src.zip" -Force
+
       - name: Install dependencies
         working-directory: installer
         run: pnpm install --no-frozen-lockfile
@@ -41,7 +77,6 @@ jobs:
       - name: Build installers
         working-directory: installer
         env:
-          # Suppress code-signing — no cert in CI.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node build.js
@@ -49,8 +84,10 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installers
-          path: installer/dist/*.exe
+          name: release-files
+          path: |
+            installer/dist/*.exe
+            reflux-src.zip
           if-no-files-found: error
 
   release:
@@ -59,13 +96,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: windows-installers
+          name: release-files
           path: dist/
 
       - name: Resolve tag name
@@ -85,25 +119,22 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.tag.outputs.name, '-') }}
           generate_release_notes: true
-          files: dist/*.exe
+          files: dist/**
           body: |
             ## Installation
 
-            ### GUI (recommended)
+            ### GUI installer (recommended)
             Download **`reflux-*-win-x64-setup.exe`** and run it. No installation required — it's a portable single-file app.
 
-            Reflux runtime files are copied to `%APPDATA%\Reflux\src\` on first install so Fluxer can find them even after the exe is moved.
+            On first install, the installer downloads the Reflux runtime from this release and writes it to `%APPDATA%\Reflux\src\` so Fluxer can always find it.
+
+            Use the **Update** button inside the installer to fetch the latest runtime without reinstalling.
 
             ### CLI (advanced)
-            Download **`reflux-*-win-x64-cli.exe`** alongside the `src/` folder from this release and keep the same directory structure:
-
-            ```
-            reflux-v*/
-            ├── src/
-            └── installer/dist/reflux-*-win-x64-cli.exe
-            ```
-
-            Then run from a terminal:
+            Download **`reflux-*-win-x64-cli.exe`** and run it from a terminal:
             ```
             reflux-vX.X.X-win-x64-cli.exe          # install
             ```
+
+            ### Runtime source
+            **`reflux-src.zip`** contains the raw Reflux runtime files. The GUI installer downloads this automatically — you only need it if you're doing manual or scripted installs.
