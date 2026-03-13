@@ -18,7 +18,7 @@ import {createRequire}  from 'node:module';
 import {fileURLToPath}  from 'node:url';
 import * as nodePath    from 'node:path';
 import * as nodeFs      from 'node:fs';
-import {app, ipcMain, session} from 'electron';
+import {app, ipcMain, session, webContents} from 'electron';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = nodePath.dirname(__filename);
@@ -44,7 +44,32 @@ const pluginManager = require('./core/pluginManager.js');
 // Register IPC handlers immediately (before app.whenReady so handlers are in
 // place by the time any renderer tries to call them).
 settings.registerIpc(ipcMain);
-pluginManager.registerIpc(ipcMain);
+pluginManager.registerIpc(ipcMain, {
+  // Inject (or re-inject) a plugin's renderer script into all live Fluxer tabs.
+  // The plugin's renderer-side IIFE must reset its own guard flag in stop() for
+  // re-injection to take effect after a disable → re-enable cycle.
+  async onRendererEnable(plugin) {
+    let src;
+    try { src = nodeFs.readFileSync(plugin.rendererSrc, 'utf8'); }
+    catch (err) {
+      console.error(`[Reflux:Main] Cannot read renderer src for "${plugin.name}":`, err.message);
+      return;
+    }
+    for (const wc of getFluxerWebContents()) {
+      await wc.executeJavaScript(src).catch(e =>
+        console.error(`[Reflux:Main] Live-enable "${plugin.name}" failed:`, e.message));
+    }
+  },
+
+  // Unregister a plugin from all live Fluxer tabs, calling its stop() in the renderer.
+  async onRendererDisable(name) {
+    const script = `void window.__reflux?.pluginManager.unregister(${JSON.stringify(name)})`;
+    for (const wc of getFluxerWebContents()) {
+      await wc.executeJavaScript(script).catch(e =>
+        console.error(`[Reflux:Main] Live-disable "${name}" failed:`, e.message));
+    }
+  },
+});
 
 // Load and start all enabled plugins (main-process side).
 pluginManager.loadAll();
@@ -52,6 +77,18 @@ pluginManager.loadAll();
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Return all live Fluxer web contents (pages loaded on web.fluxer.app).
+ * Used to push live enable/disable changes without requiring a restart.
+ * @returns {Electron.WebContents[]}
+ */
+function getFluxerWebContents() {
+  return webContents.getAllWebContents().filter(wc => {
+    try { return !wc.isDestroyed() && wc.getURL().includes('web.fluxer.app'); }
+    catch { return false; }
+  });
+}
 
 /** Cache renderer.js contents to avoid re-reading on every new window. */
 let _rendererScript = null;

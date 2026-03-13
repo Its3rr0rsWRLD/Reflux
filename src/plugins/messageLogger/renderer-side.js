@@ -320,6 +320,7 @@
         delete el.dataset.refluxPending;
       });
       deleteCache.clear();
+      window.__reflux_messageLogger_loaded = false;
       console.log(TAG, 'Stopped.');
     },
   });

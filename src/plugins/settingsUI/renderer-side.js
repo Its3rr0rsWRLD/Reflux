@@ -379,7 +379,7 @@
     // ── Installed Plugins subsection ─────────────────────────────────────
     const { sec: instSec, content: instContent } = makeSubsection(
       c, 'Installed Plugins',
-      'Toggle plugins on or off. Built-in changes take effect after restarting Fluxer.',
+      'Toggle plugins on or off. Changes take effect immediately.',
     );
     inner.appendChild(instSec);
 
@@ -626,6 +626,7 @@
       hideRefluxPanel();
       document.getElementById('reflux-sidebar-section')?.remove();
       removeActiveStyle();
+      window.__reflux_settingsUI_loaded = false;
     },
   });
 

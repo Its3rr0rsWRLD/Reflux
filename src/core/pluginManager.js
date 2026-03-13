@@ -163,12 +163,32 @@ function list() {
 
 /**
  * Register ipcMain handlers so the renderer settings UI can manage plugins.
+ *
  * @param {Electron.IpcMain} ipcMain
+ * @param {{ onRendererEnable?: (plugin: object) => Promise<void>,
+ *            onRendererDisable?: (name: string) => Promise<void> }} [callbacks]
+ *   Optional hooks called after the main-process enable/disable so the caller
+ *   can push the change into live Fluxer web contents without a restart.
  */
-function registerIpc(ipcMain) {
-  ipcMain.handle(IPC_CH.LIST,    ()               => list());
-  ipcMain.handle(IPC_CH.ENABLE,  (_e, name)       => enablePlugin(name));
-  ipcMain.handle(IPC_CH.DISABLE, (_e, name)       => disablePlugin(name));
+function registerIpc(ipcMain, { onRendererEnable, onRendererDisable } = {}) {
+  ipcMain.handle(IPC_CH.LIST, () => list());
+
+  ipcMain.handle(IPC_CH.ENABLE, async (_e, name) => {
+    enablePlugin(name);
+    const entry = _registry.get(name);
+    if (onRendererEnable && entry?.module.rendererSrc) {
+      await onRendererEnable(entry.module).catch(err =>
+        console.error(`[Reflux:PluginManager] onRendererEnable("${name}") threw:`, err));
+    }
+  });
+
+  ipcMain.handle(IPC_CH.DISABLE, async (_e, name) => {
+    disablePlugin(name);
+    if (onRendererDisable) {
+      await onRendererDisable(name).catch(err =>
+        console.error(`[Reflux:PluginManager] onRendererDisable("${name}") threw:`, err));
+    }
+  });
 }
 
 module.exports = { loadAll, stopAll, startPlugin, stopPlugin, enablePlugin, disablePlugin, list, registerIpc };
