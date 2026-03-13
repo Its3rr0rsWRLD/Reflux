@@ -64,10 +64,16 @@ async function downloadSrc() {
 	const url = `https://github.com/${GITHUB_REPO}/releases/latest/download/reflux-src.zip`;
 	const tmpZip = path.join(os.tmpdir(), `reflux-src-${Date.now()}.zip`);
 
-	send('step', 'Downloading Reflux runtime from GitHub…');
+	send('step', `Downloading Reflux runtime from GitHub…`);
 	await download(url, tmpZip);
 
-	send('step', 'Extracting runtime files…');
+	const zipSize = fs.statSync(tmpZip).size;
+	if (zipSize < 100) {
+		fs.unlinkSync(tmpZip);
+		throw new Error(`Downloaded file is too small (${zipSize} bytes) — GitHub release asset may be missing.`);
+	}
+	send('step', `Downloaded ${(zipSize / 1024).toFixed(1)} KB. Extracting…`);
+
 	if (fs.existsSync(REFLUX_APPDATA_SRC)) fs.rmSync(REFLUX_APPDATA_SRC, {recursive: true});
 	fs.mkdirSync(REFLUX_APPDATA_SRC, {recursive: true});
 
@@ -327,7 +333,20 @@ async function runUpdate() {
 		return;
 	}
 	await downloadSrc();
-	complete(true, 'Reflux runtime updated. Restart Fluxer to apply the latest version.');
+
+	// Read the stamped version from the freshly-extracted preload.js so the
+	// user can see exactly what version was applied.
+	let newVersion = null;
+	try {
+		const preloadSrc = fs.readFileSync(path.join(REFLUX_APPDATA_SRC, 'preload.js'), 'utf8');
+		const m = preloadSrc.match(/version:\s*'([^']+)'/);
+		if (m) newVersion = m[1];
+	} catch { /* non-fatal */ }
+
+	const msg = newVersion
+		? `Updated to Reflux v${newVersion}. Restart Fluxer to apply.`
+		: 'Reflux runtime updated. Restart Fluxer to apply.';
+	complete(true, msg);
 }
 
 // ── Uninstall ─────────────────────────────────────────────────────────────────

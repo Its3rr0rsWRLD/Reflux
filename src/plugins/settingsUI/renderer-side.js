@@ -577,12 +577,26 @@
     const svgE = iconWrap.firstElementChild;
     if (svgE) svgE.setAttribute('class', sc.itemIcon);
 
+    const ver = window.refluxBridge?.version;
+
     const labelSpan = document.createElement('span');
     labelSpan.className = sc.itemLabel;
     labelSpan.innerHTML = `<div class="${sc.tabLabel}"><span>Plugins</span></div>`;
 
     btn.appendChild(svgE || iconWrap);
     btn.appendChild(labelSpan);
+
+    const verSpan = document.createElement('span');
+    verSpan.id = 'reflux-version-badge';
+    verSpan.textContent = `Reflux${ver ? ` (${ver})` : ''}`;
+    verSpan.style.cssText = [
+      'font-size:10px', 'font-weight:600',
+      'color:var(--text-muted,#949ba4)',
+      'padding:1px 5px', 'border-radius:3px',
+      'background:var(--background-tertiary,#2b2d31)',
+      'white-space:nowrap', 'flex-shrink:0',
+    ].join(';');
+    btn.appendChild(verSpan);
 
     btn.addEventListener('click', async () => {
       btn.setAttribute('aria-selected', 'true');
